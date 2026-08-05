@@ -1,0 +1,30 @@
+server:
+  port: ${AI_SERVICE_PORT:8081}
+
+spring:
+  application:
+    name: ai-scientist-ai-service
+
+# 阿里云百炼平台（OpenAI 兼容接口）
+langchain4j:
+  open-ai:
+    chat-model:
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api-key: ${ALIYUN_BAILIAN_API_KEY:}
+      model-name: ${QWEN_MODEL:qwen-max}
+      temperature: 0.7
+
+# 向量数据库（chroma | milvus，schema 由团队确定，见 docs/rag.md）
+vector:
+  db: ${VECTOR_DB:chroma}
+  chroma:
+    host: ${CHROMA_HOST:localhost}
+    port: ${CHROMA_PORT:8000}
+  milvus:
+    host: ${MILVUS_HOST:localhost}
+    port: ${MILVUS_PORT:19530}
+
+logging:
+  level:
+    com.aiscientist.ai: INFO
+    dev.langchain4j: INFO

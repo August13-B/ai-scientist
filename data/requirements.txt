@@ -1,0 +1,6 @@
+# 锁定精确版本，引入新库时同步更新
+pdfplumber==0.11.4
+pymupdf==1.28.0
+grobid-client-python==0.1.2
+numpy==1.26.4
+pandas==2.2.2
