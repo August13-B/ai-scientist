@@ -118,6 +118,7 @@ npm run dev
 | 文档 | 内容 |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | 系统架构设计（四层 + 通信链路） |
+| [docs/git-guide.md](docs/git-guide.md) | Git & GitHub 协作操作规范（零基础新手向，必读） |
 | [docs/agents.md](docs/agents.md) | 七 Agent 管线设计（DAG 状态流转 / 数据流 / 输出字段） |
 | [docs/rag.md](docs/rag.md) | 四库 RAG 设计（论文/方法/数据/证据库） |
 | [docs/tech-plan.md](docs/tech-plan.md) | 赛题技术方案（对标提交 PDF） |
