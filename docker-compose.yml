@@ -1,0 +1,44 @@
+# 中间件编排：MySQL + 向量数据库（Chroma 开发 / Milvus 生产）
+# 应用服务（backend / ai-service / frontend）的镜像配置由各小组后续补充
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: aiscientist-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-change-me}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ai_scientist}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 开发环境向量数据库（轻量，本地文件存储）
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: aiscientist-chroma
+    ports:
+      - "${CHROMA_PORT:-8000}:8000"
+    volumes:
+      - chroma-data:/data
+
+  # 生产环境向量数据库（可选，资源充足时启用）
+  milvus:
+    image: milvusdb/milvus:v2.4.0
+    container_name: aiscientist-milvus
+    profiles: ["prod"]
+    ports:
+      - "${MILVUS_PORT:-19530}:19530"
+      - "9091:9091"
+    volumes:
+      - milvus-data:/var/lib/milvus
+
+volumes:
+  mysql-data:
+  chroma-data:
+  milvus-data:
