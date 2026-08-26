@@ -77,7 +77,25 @@ public class KnowledgeDiscoveryAgent {
         if (!request.evidence().isEmpty()) {
             return request.evidence();
         }
-        throw new IllegalArgumentException("paper evidence must not be empty");
+        List<Object> results = ragSearchService.search(
+                "papers", request.question(), request.topK());
+        if (results == null || results.isEmpty()) {
+            throw new IllegalArgumentException("论文检索未返回可追溯证据");
+        }
+        try {
+            return results.stream()
+                    .map(this::toPaperEvidence)
+                    .toList();
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("论文检索返回了无效证据", exception);
+        }
+    }
+
+    private PaperEvidence toPaperEvidence(Object result) {
+        if (result instanceof PaperEvidence paperEvidence) {
+            return paperEvidence;
+        }
+        return objectMapper.convertValue(result, PaperEvidence.class);
     }
 
     private Map<String, Object> payload(
