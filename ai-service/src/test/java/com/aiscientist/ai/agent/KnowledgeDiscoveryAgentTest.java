@@ -69,6 +69,7 @@ class KnowledgeDiscoveryAgentTest {
                 result.selectedProblem());
         assertEquals("面向跨地区小样本的水稻病害识别", result.paperTitle());
         assertEquals(1, result.researchGaps().size());
+        assertEquals(List.of("迁移自监督学习"), result.transferOpportunities());
         assertEquals(List.of("doi:10.1000/a", "doi:10.1000/b"), result.references());
         verifyNoInteractions(rag);
 

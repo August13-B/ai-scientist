@@ -115,4 +115,4 @@ IDLE → UNDERSTANDING → RETRIEVING/KNOWLEDGE/HYPOTHESIS(并行) → AGGREGATE
 3. 三阶段分别输出 `EvidenceExtraction`、`CrossPaperAnalysis` 和 `DiscoveryResult`。
 4. 最终 `references` 与每个 Research Gap 的 `evidenceIds` 只能引用输入论文的 DOI、PMID 或 URL。
 
-下游假设生成 Agent 主要消费 `selectedProblem`、`researchGaps`、`knownFindings`、`limitations`、`conflicts`、`paperTitle` 和 `paperAbstract`。管线编排只负责传递这些结构化字段，不需要解析自然语言段落。
+下游假设生成 Agent 主要消费 `selectedProblem`、`researchGaps`、`knownFindings`、`limitations`、`conflicts`、`transferOpportunities`、`paperTitle` 和 `paperAbstract`。管线编排只负责传递这些结构化字段，不需要解析自然语言段落。

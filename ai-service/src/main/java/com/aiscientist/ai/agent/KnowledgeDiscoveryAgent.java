@@ -63,11 +63,22 @@ public class KnowledgeDiscoveryAgent {
 
         Map<String, Object> rankingInput = payload(request, "comparison", comparison);
         rankingInput.put("paperAnalyses", extraction.papers());
-        DiscoveryResult result = call(
+        DiscoveryResult ranked = call(
                 "Research Gap 排序",
                 KnowledgeDiscoveryPrompts.ranking(),
                 rankingInput,
                 DiscoveryResult.class
+        );
+        DiscoveryResult result = new DiscoveryResult(
+                ranked.knownFindings(),
+                ranked.limitations(),
+                ranked.conflicts(),
+                comparison.transferOpportunities(),
+                ranked.researchGaps(),
+                ranked.selectedProblem(),
+                ranked.paperTitle(),
+                ranked.paperAbstract(),
+                ranked.references()
         );
         validateResultSources(result, allowedSources);
         return result;

@@ -11,7 +11,7 @@ Spring Boot + LangChain4j，承载七 Agent DAG 管线、四库 RAG 检索与百
 
 ## 知识发现 Agent 接入
 
-`KnowledgeDiscoveryAgent.discover(DiscoveryRequest)` 已实现通用三阶段流程：逐篇证据提取、跨论文比较、Research Gap 排序。调用方传入科研问题、可选领域、`topK` 和可选论文证据，返回结构化 `DiscoveryResult`，其中包含已知发现、局限、冲突、排序后的研究空白、Problem Statement、Paper Title、Paper Abstract 与真实来源标识。
+`KnowledgeDiscoveryAgent.discover(DiscoveryRequest)` 已实现通用三阶段流程：逐篇证据提取、跨论文比较、Research Gap 排序。调用方传入科研问题、可选领域、`topK` 和可选论文证据，返回结构化 `DiscoveryResult`，其中包含已知发现、局限、冲突、技术迁移机会、排序后的研究空白、Problem Statement、Paper Title、Paper Abstract 与真实来源标识。
 
 - 优先使用 `DiscoveryRequest.evidence`，便于文献检索 Agent 将结果直接交给知识发现 Agent。
 - 未传直接证据时，自动调用 `RagSearchService.search("papers", question, topK)`。

@@ -111,6 +111,7 @@ public final class KnowledgeDiscoveryModels {
             List<String> knownFindings,
             List<String> limitations,
             List<String> conflicts,
+            List<String> transferOpportunities,
             List<ResearchGap> researchGaps,
             String selectedProblem,
             String paperTitle,
@@ -121,6 +122,7 @@ public final class KnowledgeDiscoveryModels {
             knownFindings = immutable(knownFindings);
             limitations = immutable(limitations);
             conflicts = immutable(conflicts);
+            transferOpportunities = immutable(transferOpportunities);
             researchGaps = immutable(researchGaps);
             selectedProblem = requireText(selectedProblem, "selectedProblem");
             paperTitle = requireText(paperTitle, "paperTitle");
