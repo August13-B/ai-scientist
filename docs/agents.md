@@ -41,7 +41,7 @@
 |---|---|---|---|---|---|
 | ① | 问题理解 | `ProblemUnderstandingAgent` | 将自然语言科研问题拆解为结构化子查询，识别领域标签、关键概念、已知条件与待求解变量 | - | 子查询集合 |
 | ② | 文献检索 | `LiteratureRetrievalAgent` | 基于子查询在论文库/证据库向量检索，召回 Top-K 文献，提取关键段落与引用链 | 论文库、证据库 | 文献列表 + 引用链 |
-| ③ | 知识发现 | `KnowledgeDiscoveryAgent` | 跨文献知识关联挖掘，识别研究空白（Research Gap）与技术迁移机会 | 论文库、方法库 | Problem Statement / Paper Title / Paper Abstract |
+| ③ | 知识发现 | `KnowledgeDiscoveryAgent` | 三阶段跨文献分析：证据提取、论文比较、Research Gap 排序，并校验引用来源 | 论文库、方法库 | Problem Statement / Paper Title / Paper Abstract + 排序后的 Gap 与证据 |
 | ④ | 假设生成 | `HypothesisGenerationAgent` | 归纳与演绎推理，基于已知事实生成 3–5 个候选假设，每个附带推理链条 | 方法库、论文库、证据库 | Rationale / Technical Details / Methods |
 | ⑤ | 科学假设评估 | `HypothesisEvaluationAgent` | 多维度评分（创新性、可行性、引用真实性、数据可获得性）；幻觉检测：反向比对真实文献，虚构引用立即打回 | 证据库、论文库、数据集库 | 评分排序 + 幻觉检测报告 / References |
 | ⑥ | 实验设计 | `ExperimentDesignAgent` | 为最优假设设计完整实验方案：Baselines、Metrics、拟用数据集、预期结果范围 | 方法库、数据集库 | Experiments / Results |
@@ -105,3 +105,14 @@ IDLE → UNDERSTANDING → RETRIEVING/KNOWLEDGE/HYPOTHESIS(并行) → AGGREGATE
 - 每个 Agent 维护独立 System Prompt，含角色定义、任务目标、输出格式约束（JSON Schema）
 - 幻觉检测 Prompt 内置「引用真实性核验」指令：要求输出每条引用的 DOI/PMID 并反向比对
 - 配置化 Prompt 文件存放于 `ai-service/src/main/resources/prompts/`（目录待建）
+
+### 7.1 知识发现 Agent（已实现）
+
+知识发现 Agent 使用通用领域输入，不写死 SSD 或其他学科。其调用契约为：
+
+1. 输入 `DiscoveryRequest(question, domain, evidence, topK)`；`evidence` 可为空。
+2. 有直接证据时优先分析；否则调用论文库 `RagSearchService.search("papers", question, topK)`。
+3. 三阶段分别输出 `EvidenceExtraction`、`CrossPaperAnalysis` 和 `DiscoveryResult`。
+4. 最终 `references` 与每个 Research Gap 的 `evidenceIds` 只能引用输入论文的 DOI、PMID 或 URL。
+
+下游假设生成 Agent 主要消费 `selectedProblem`、`researchGaps`、`knownFindings`、`limitations`、`conflicts`、`paperTitle` 和 `paperAbstract`。管线编排只负责传递这些结构化字段，不需要解析自然语言段落。
