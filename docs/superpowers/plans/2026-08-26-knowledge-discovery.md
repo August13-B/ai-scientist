@@ -43,7 +43,7 @@ void paperEvidenceRequiresTraceableSource() {
 
 - [ ] **Step 2: Run the test and verify failure**
 
-Run: `mvn -pl ai-service -Dtest=KnowledgeDiscoveryModelsTest test`
+Run: `mvn -f ai-service/pom.xml -Dtest=KnowledgeDiscoveryModelsTest test`
 
 Expected: FAIL because `KnowledgeDiscoveryModels` does not exist.
 
@@ -53,7 +53,7 @@ Use immutable Java records. Normalize nullable lists with `List.copyOf`, require
 
 - [ ] **Step 4: Run the focused test**
 
-Run: `mvn -pl ai-service -Dtest=KnowledgeDiscoveryModelsTest test`
+Run: `mvn -f ai-service/pom.xml -Dtest=KnowledgeDiscoveryModelsTest test`
 
 Expected: PASS.
 
@@ -82,7 +82,7 @@ Mock `RagSearchService` and `BailianClient`; provide two traceable papers and th
 
 - [ ] **Step 2: Run the focused test and verify failure**
 
-Run: `mvn -pl ai-service -Dtest=KnowledgeDiscoveryAgentTest test`
+Run: `mvn -f ai-service/pom.xml -Dtest=KnowledgeDiscoveryAgentTest test`
 
 Expected: FAIL because the service method is not implemented.
 
@@ -100,7 +100,7 @@ Build the allowed set from `PaperEvidence.sourceId()`. Reject a final `Discovery
 
 - [ ] **Step 6: Run the focused tests**
 
-Run: `mvn -pl ai-service -Dtest=KnowledgeDiscoveryAgentTest test`
+Run: `mvn -f ai-service/pom.xml -Dtest=KnowledgeDiscoveryAgentTest test`
 
 Expected: PASS.
 
@@ -126,7 +126,7 @@ Add tests that assert: empty direct evidence calls `search("papers", question, t
 
 - [ ] **Step 2: Run the focused tests and verify failure**
 
-Run: `mvn -pl ai-service -Dtest=KnowledgeDiscoveryAgentTest test`
+Run: `mvn -f ai-service/pom.xml -Dtest=KnowledgeDiscoveryAgentTest test`
 
 Expected: at least the new malformed JSON/provenance assertions fail before the guards exist.
 
@@ -136,7 +136,7 @@ Throw `IllegalArgumentException` for missing evidence and `IllegalStateException
 
 - [ ] **Step 4: Run all ai-service tests**
 
-Run: `mvn -pl ai-service test`
+Run: `mvn -f ai-service/pom.xml test`
 
 Expected: PASS with no API key or vector database.
 
@@ -162,7 +162,7 @@ Add a short section showing construction fields, the three analysis phases, fail
 
 - [ ] **Step 2: Run final verification**
 
-Run: `mvn -pl ai-service test`
+Run: `mvn -f ai-service/pom.xml test`
 
 Run: `git diff --check`
 
