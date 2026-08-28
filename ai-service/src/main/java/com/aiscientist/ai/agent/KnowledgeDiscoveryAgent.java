@@ -50,9 +50,7 @@ public class KnowledgeDiscoveryAgent {
                 payload(request, "papers", evidence),
                 EvidenceExtraction.class
         );
-        requireSources(extraction.papers().stream()
-                .map(KnowledgeDiscoveryModels.PaperAnalysis::sourceId)
-                .toList(), allowedSources);
+        requireCompleteExtraction(extraction, allowedSources);
 
         CrossPaperAnalysis comparison = call(
                 "跨论文比较",
@@ -152,6 +150,22 @@ public class KnowledgeDiscoveryAgent {
         requireSources(result.references(), allowedSources);
         result.researchGaps().forEach(gap ->
                 requireSources(gap.evidenceIds(), allowedSources));
+    }
+
+    private void requireCompleteExtraction(
+            EvidenceExtraction extraction,
+            Set<String> allowedSources
+    ) {
+        List<String> sources = extraction.papers().stream()
+                .map(KnowledgeDiscoveryModels.PaperAnalysis::sourceId)
+                .toList();
+        Set<String> uniqueSources = Set.copyOf(sources);
+        if (sources.size() != allowedSources.size()
+                || uniqueSources.size() != sources.size()
+                || !uniqueSources.equals(allowedSources)) {
+            throw new IllegalStateException(
+                    "证据提取结果必须覆盖每个输入来源且不得重复");
+        }
     }
 
     private void requireSources(List<String> sources, Set<String> allowedSources) {

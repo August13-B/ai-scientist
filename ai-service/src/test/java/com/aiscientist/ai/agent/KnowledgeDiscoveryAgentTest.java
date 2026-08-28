@@ -156,6 +156,45 @@ class KnowledgeDiscoveryAgentTest {
     }
 
     @Test
+    void rejectsExtractionThatOmitsAnInputPaper() {
+        BailianClient bailian = mock(BailianClient.class);
+        RagSearchService rag = mock(RagSearchService.class);
+        String incompleteExtraction = """
+                {"papers":[
+                  {"sourceId":"doi:10.1000/a","researchQuestion":"病害识别","methods":["CNN"],"findings":["有效"],"limitations":["单一地区"],"futureWork":["跨地区验证"]}
+                ]}
+                """;
+        when(bailian.chat(anyString(), anyString(), anyString()))
+                .thenReturn(incompleteExtraction);
+        KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
+                bailian, rag, new ObjectMapper());
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> agent.discover(requestWithEvidence()));
+
+        assertTrue(error.getMessage().contains("覆盖每个输入来源"));
+        verify(bailian, times(1)).chat(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void rejectsExtractionThatDuplicatesAnInputPaper() {
+        BailianClient bailian = mock(BailianClient.class);
+        RagSearchService rag = mock(RagSearchService.class);
+        String duplicatedExtraction = EXTRACTION_JSON
+                .replace("doi:10.1000/b", "doi:10.1000/a");
+        when(bailian.chat(anyString(), anyString(), anyString()))
+                .thenReturn(duplicatedExtraction);
+        KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
+                bailian, rag, new ObjectMapper());
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> agent.discover(requestWithEvidence()));
+
+        assertTrue(error.getMessage().contains("覆盖每个输入来源"));
+        verify(bailian, times(1)).chat(anyString(), anyString(), anyString());
+    }
+
+    @Test
     void rejectsReferencesNotPresentInInputEvidence() {
         BailianClient bailian = mock(BailianClient.class);
         RagSearchService rag = mock(RagSearchService.class);

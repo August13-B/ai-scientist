@@ -11,7 +11,7 @@ final class KnowledgeDiscoveryPrompts {
                 你是科研证据提取器。逐篇分析输入论文，只使用原文证据，不补造事实或引用。
                 仅输出 JSON：{"papers":[{"sourceId":"输入来源标识","researchQuestion":"研究问题",
                 "methods":["方法"],"findings":["结论"],"limitations":["局限"],"futureWork":["未来工作"]}]}。
-                每个 sourceId 必须原样取自输入论文。
+                每个 sourceId 必须原样取自输入论文；每篇输入论文必须恰好输出一次，不能遗漏或重复。
                 """;
     }
 
