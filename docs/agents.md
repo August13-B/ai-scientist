@@ -112,7 +112,8 @@ IDLE → UNDERSTANDING → RETRIEVING/KNOWLEDGE/HYPOTHESIS(并行) → AGGREGATE
 
 1. 输入 `DiscoveryRequest(question, domain, evidence, topK)`；`evidence` 可为空。
 2. 有直接证据时优先分析；否则调用论文库 `RagSearchService.search("papers", question, topK)`。
-3. 三阶段分别输出 `EvidenceExtraction`、`CrossPaperAnalysis` 和 `DiscoveryResult`。
-4. 最终 `references` 与每个 Research Gap 的 `evidenceIds` 只能引用输入论文的 DOI、PMID 或 URL。
+3. 直接证据与 RAG 返回对象都需包含 `title`、`content` 及 DOI/PMID/URL 中至少一种来源；Agent 按规范化来源标识去重，至少需要两篇不同来源论文。
+4. 三阶段分别输出 `EvidenceExtraction`、`CrossPaperAnalysis` 和 `DiscoveryResult`；证据提取必须逐篇一一覆盖输入来源。
+5. 至少生成一个 Research Gap；最终 `references` 与每个 Gap 的 `evidenceIds` 只能引用输入论文的 DOI、PMID 或 URL，且 `references` 必须覆盖全部 Gap 来源。
 
 下游假设生成 Agent 主要消费 `selectedProblem`、`researchGaps`、`knownFindings`、`limitations`、`conflicts`、`transferOpportunities`、`paperTitle` 和 `paperAbstract`。管线编排只负责传递这些结构化字段，不需要解析自然语言段落。

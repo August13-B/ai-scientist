@@ -250,6 +250,24 @@ class KnowledgeDiscoveryAgentTest {
         assertTrue(error.getMessage().contains("未覆盖 Research Gap 证据"));
     }
 
+    @Test
+    void acceptsJsonWrappedInMarkdownCodeFences() {
+        BailianClient bailian = mock(BailianClient.class);
+        RagSearchService rag = mock(RagSearchService.class);
+        when(bailian.chat(anyString(), anyString(), anyString()))
+                .thenReturn(
+                        fenced(EXTRACTION_JSON),
+                        fenced(COMPARISON_JSON),
+                        fenced(RESULT_JSON)
+                );
+        KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
+                bailian, rag, new ObjectMapper());
+
+        DiscoveryResult result = agent.discover(requestWithEvidence());
+
+        assertEquals("面向跨地区小样本的水稻病害识别", result.paperTitle());
+    }
+
     private static void stubSuccessfulStages(BailianClient bailian) {
         when(bailian.chat(anyString(), anyString(), anyString()))
                 .thenReturn(EXTRACTION_JSON, COMPARISON_JSON, RESULT_JSON);
@@ -269,5 +287,9 @@ class KnowledgeDiscoveryAgentTest {
     private static PaperEvidence paper(String title, String content, String doi) {
         return new PaperEvidence(title, content, List.of("作者"), 2025,
                 doi, null, null);
+    }
+
+    private static String fenced(String json) {
+        return "```json\n" + json + "\n```";
     }
 }
