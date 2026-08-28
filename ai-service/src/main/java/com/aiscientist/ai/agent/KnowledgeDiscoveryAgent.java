@@ -85,21 +85,30 @@ public class KnowledgeDiscoveryAgent {
     }
 
     private List<PaperEvidence> loadEvidence(DiscoveryRequest request) {
+        List<PaperEvidence> evidence;
         if (!request.evidence().isEmpty()) {
-            return request.evidence();
+            evidence = request.evidence();
+        } else {
+            List<Object> results = ragSearchService.search(
+                    "papers", request.question(), request.topK());
+            if (results == null || results.isEmpty()) {
+                throw new IllegalArgumentException("论文检索未返回可追溯证据");
+            }
+            try {
+                evidence = results.stream()
+                        .map(this::toPaperEvidence)
+                        .toList();
+            } catch (IllegalArgumentException exception) {
+                throw new IllegalArgumentException("论文检索返回了无效证据", exception);
+            }
         }
-        List<Object> results = ragSearchService.search(
-                "papers", request.question(), request.topK());
-        if (results == null || results.isEmpty()) {
-            throw new IllegalArgumentException("论文检索未返回可追溯证据");
+
+        Map<String, PaperEvidence> distinct = new LinkedHashMap<>();
+        evidence.forEach(paper -> distinct.putIfAbsent(paper.sourceId(), paper));
+        if (distinct.size() < 2) {
+            throw new IllegalArgumentException("知识发现至少需要两篇不同来源论文");
         }
-        try {
-            return results.stream()
-                    .map(this::toPaperEvidence)
-                    .toList();
-        } catch (IllegalArgumentException exception) {
-            throw new IllegalArgumentException("论文检索返回了无效证据", exception);
-        }
+        return List.copyOf(distinct.values());
     }
 
     private PaperEvidence toPaperEvidence(Object result) {

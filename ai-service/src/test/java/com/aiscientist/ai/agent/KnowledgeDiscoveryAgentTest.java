@@ -120,6 +120,28 @@ class KnowledgeDiscoveryAgentTest {
     }
 
     @Test
+    void rejectsEvidenceWithoutTwoDistinctPaperSources() {
+        BailianClient bailian = mock(BailianClient.class);
+        RagSearchService rag = mock(RagSearchService.class);
+        KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
+                bailian, rag, new ObjectMapper());
+        DiscoveryRequest request = new DiscoveryRequest(
+                "研究问题", "通用科研",
+                List.of(
+                        paper("论文 A", "摘要 A", "DOI:10.1000/A"),
+                        paper("论文 A 重复记录", "摘要 A", "https://doi.org/10.1000/a")
+                ),
+                5
+        );
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> agent.discover(request));
+
+        assertEquals("知识发现至少需要两篇不同来源论文", error.getMessage());
+        verifyNoInteractions(bailian, rag);
+    }
+
+    @Test
     void reportsTheStageForMalformedModelJson() {
         BailianClient bailian = mock(BailianClient.class);
         RagSearchService rag = mock(RagSearchService.class);
