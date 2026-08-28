@@ -31,7 +31,8 @@ final class KnowledgeDiscoveryPrompts {
                 "researchGaps":[{"gap":"研究空白","evidenceIds":["输入来源标识"],"confidence":0.0,
                 "rankingReason":"排序理由"}],"selectedProblem":"待研究问题","paperTitle":"论文标题",
                 "paperAbstract":"论文摘要","references":["输入来源标识"]}。
-                evidenceIds 和 references 只能使用输入中存在的来源标识，严禁虚构引用。
+                至少输出一个 Research Gap。evidenceIds 和 references 只能使用输入中存在的来源标识，
+                references 必须覆盖全部 Research Gap 使用的 evidenceIds，严禁虚构或遗漏引用。
                 """;
     }
 }

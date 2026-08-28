@@ -147,9 +147,20 @@ public class KnowledgeDiscoveryAgent {
             DiscoveryResult result,
             Set<String> allowedSources
     ) {
+        if (result.researchGaps().isEmpty()) {
+            throw new IllegalStateException(
+                    "知识发现结果至少包含一个 Research Gap");
+        }
         requireSources(result.references(), allowedSources);
         result.researchGaps().forEach(gap ->
                 requireSources(gap.evidenceIds(), allowedSources));
+        Set<String> gapSources = result.researchGaps().stream()
+                .flatMap(gap -> gap.evidenceIds().stream())
+                .collect(Collectors.toUnmodifiableSet());
+        if (!result.references().containsAll(gapSources)) {
+            throw new IllegalStateException(
+                    "最终 references 未覆盖 Research Gap 证据");
+        }
     }
 
     private void requireCompleteExtraction(

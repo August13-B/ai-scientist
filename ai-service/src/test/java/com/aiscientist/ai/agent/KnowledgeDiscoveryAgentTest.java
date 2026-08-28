@@ -210,6 +210,46 @@ class KnowledgeDiscoveryAgentTest {
         assertTrue(error.getMessage().contains("未提供的文献来源"));
     }
 
+    @Test
+    void rejectsResultWithoutResearchGap() {
+        BailianClient bailian = mock(BailianClient.class);
+        RagSearchService rag = mock(RagSearchService.class);
+        String resultWithoutGap = """
+                {"knownFindings":["视觉模型可识别病害"],"limitations":["地域泛化不足"],
+                 "conflicts":["小样本条件下模型结论不一致"],"researchGaps":[],
+                 "selectedProblem":"如何提升跨地区泛化能力？","paperTitle":"跨地区病害识别",
+                 "paperAbstract":"研究跨地区条件下的病害识别。",
+                 "references":["doi:10.1000/a","doi:10.1000/b"]}
+                """;
+        when(bailian.chat(anyString(), anyString(), anyString()))
+                .thenReturn(EXTRACTION_JSON, COMPARISON_JSON, resultWithoutGap);
+        KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
+                bailian, rag, new ObjectMapper());
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> agent.discover(requestWithEvidence()));
+
+        assertTrue(error.getMessage().contains("至少包含一个 Research Gap"));
+    }
+
+    @Test
+    void rejectsReferencesThatDoNotCoverGapEvidence() {
+        BailianClient bailian = mock(BailianClient.class);
+        RagSearchService rag = mock(RagSearchService.class);
+        String incompleteReferences = RESULT_JSON.replace(
+                "\"references\":[\"doi:10.1000/a\",\"doi:10.1000/b\"]",
+                "\"references\":[\"doi:10.1000/a\"]");
+        when(bailian.chat(anyString(), anyString(), anyString()))
+                .thenReturn(EXTRACTION_JSON, COMPARISON_JSON, incompleteReferences);
+        KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
+                bailian, rag, new ObjectMapper());
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> agent.discover(requestWithEvidence()));
+
+        assertTrue(error.getMessage().contains("未覆盖 Research Gap 证据"));
+    }
+
     private static void stubSuccessfulStages(BailianClient bailian) {
         when(bailian.chat(anyString(), anyString(), anyString()))
                 .thenReturn(EXTRACTION_JSON, COMPARISON_JSON, RESULT_JSON);
