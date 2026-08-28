@@ -1,5 +1,7 @@
 package com.aiscientist.ai.agent;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.List;
 import java.util.Locale;
 
@@ -43,6 +45,7 @@ public final class KnowledgeDiscoveryModels {
             }
         }
 
+        @JsonProperty(value = "sourceId", access = JsonProperty.Access.READ_ONLY)
         public String sourceId() {
             if (hasText(doi)) {
                 String normalized = doi.trim()

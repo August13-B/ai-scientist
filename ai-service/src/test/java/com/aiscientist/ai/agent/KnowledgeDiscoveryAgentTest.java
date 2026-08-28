@@ -57,8 +57,8 @@ class KnowledgeDiscoveryAgentTest {
                 "如何改进水稻病害识别？",
                 "农业人工智能",
                 List.of(
-                        paper("论文 A", "田间图像实验", "10.1000/a"),
-                        paper("论文 B", "小样本实验", "10.1000/b")
+                        paper("论文 A", "田间图像实验", "DOI:10.1000/A"),
+                        paper("论文 B", "小样本实验", "https://doi.org/10.1000/b")
                 ),
                 5
         );
@@ -77,6 +77,10 @@ class KnowledgeDiscoveryAgentTest {
         verify(bailian, times(3)).chat(anyString(), anyString(), messages.capture());
         assertTrue(messages.getAllValues().stream()
                 .allMatch(message -> message.contains("农业人工智能")));
+        assertTrue(messages.getAllValues().get(0)
+                .contains("\"sourceId\":\"doi:10.1000/a\""));
+        assertTrue(messages.getAllValues().get(0)
+                .contains("\"sourceId\":\"doi:10.1000/b\""));
     }
 
     @Test
