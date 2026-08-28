@@ -1,6 +1,7 @@
 package com.aiscientist.ai.agent;
 
 import java.util.List;
+import java.util.Locale;
 
 /** 知识发现 Agent 的输入、阶段结果与最终输出契约。 */
 public final class KnowledgeDiscoveryModels {
@@ -44,10 +45,16 @@ public final class KnowledgeDiscoveryModels {
 
         public String sourceId() {
             if (hasText(doi)) {
-                return "doi:" + doi.trim();
+                String normalized = doi.trim()
+                        .replaceFirst("(?i)^doi\\s*:\\s*", "")
+                        .replaceFirst("(?i)^https?://(?:dx\\.)?doi\\.org/", "")
+                        .toLowerCase(Locale.ROOT);
+                return "doi:" + normalized;
             }
             if (hasText(pmid)) {
-                return "pmid:" + pmid.trim();
+                String normalized = pmid.trim()
+                        .replaceFirst("(?i)^pmid\\s*:\\s*", "");
+                return "pmid:" + normalized;
             }
             return "url:" + url.trim();
         }
