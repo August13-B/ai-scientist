@@ -4,3 +4,9 @@ pymupdf==1.28.0
 grobid-client-python==0.1.2
 numpy==1.26.4
 pandas==2.2.2
+
+# ===== RAG 灌库相关 =====
+chromadb==0.5.5
+pymilvus==2.4.9
+dashscope==1.20.0
+python-dotenv==1.0.1
