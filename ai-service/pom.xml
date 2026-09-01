@@ -28,7 +28,17 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
         <!-- SSE 流式 -->
+                <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
         <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-milvus</artifactId>
+            <version>1.18.1-beta28</version>
+        </dependency>
+
+<dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
         </dependency>
