@@ -19,7 +19,7 @@
 |---|---|
 | `docs/agents.md` | **七 Agent 管线设计**（编排顺序、状态机、输出字段） |
 | `docs/architecture.md` | 四层架构与通信链路 |
-| `docs/rag.md` | 四库 RAG 设计（schema 由团队确定，不要代为固化） |
+| `docs/rag.md` | 四库 RAG 设计（**灌库脚本已实现**，JSONL 输入契约 + collection 命名 + 检索对齐见第 6/7 节） |
 | `docs/contribution.md` | 开发规范（分支/提交/代码规范） |
 | `ai-service/src/main/java/com/aiscientist/ai/pipeline/` | **管线框架源码**（本文件配套代码） |
 
@@ -131,12 +131,13 @@ public class KnowledgeDiscoveryStage implements PipelineAgent {
 ## 7. 硬性规则（违反 = 打回）
 
 1. **引用严禁虚构**（赛题红线）：所有 References / evidenceIds 必须来自真实输入来源（DOI/PMID/URL 白名单），仿照马艺萌的 `validateResultSources` 做白名单校验
-2. **不越界**：只改自己的 Agent / 阶段文件，**不要**动：`PipelineEngine`、`PipelineContext`、`PipelineModels`、其他队友的 Agent 类、`RagSearchService`、`BailianClient`、向量库配置
-3. **开发细节留白**：MySQL 表结构、向量库 collection/schema、接口请求响应字段——**由团队设计确定**，不要代为固化
-4. **密钥保密**：API Key 只放 `.env`（已 gitignore），绝不允许写进代码或提交
-5. **遵循既有风格**：record 数据契约 + 构造器校验 + 不可变列表（仿 `PipelineModels`）；中文注释说明职责
-6. **同步文档**：实现完成后更新 `docs/agents.md` 对应章节（参照已有 7.1 节写法）
-7. **测试**：必须带单元测试（mock LLM 即可），提交前 `mvn test` 通过
+2. **RAG 契约对齐**（如需检索）：四库灌库脚本已实现（`data/scripts/ingest_*.py`，Chroma/Milvus 双支持），collection 为 `papers/methods/datasets/evidence`；`RagSearchService` 返回对象字段必须与 `PaperEvidence` 对齐（title/content/doi/pmid/url/authors/year），否则 `convertValue` 转换失败；`source_id` 规范为 `doi:xxx` / `pmid:xxx` / `url:xxx`
+3. **不越界**：只改自己的 Agent / 阶段文件，**不要**动：`PipelineEngine`、`PipelineContext`、`PipelineModels`、其他队友的 Agent 类、`RagSearchService`、`BailianClient`、向量库配置
+4. **开发细节留白**：MySQL 表结构、接口请求响应字段——**由团队设计确定**，不要代为固化（向量库 collection 已随灌库脚本固化，见 docs/rag.md）
+5. **密钥保密**：API Key 只放 `.env`（已 gitignore），绝不允许写进代码或提交
+6. **遵循既有风格**：record 数据契约 + 构造器校验 + 不可变列表（仿 `PipelineModels`）；中文注释说明职责
+7. **同步文档**：实现完成后更新 `docs/agents.md` 对应章节（参照已有 7.1 节写法）
+8. **测试**：必须带单元测试（mock LLM 即可），提交前 `mvn test` 通过
 
 ## 8. 提交前检查清单
 
