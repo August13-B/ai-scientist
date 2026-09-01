@@ -117,3 +117,7 @@ IDLE â†’ UNDERSTANDING â†’ RETRIEVING/KNOWLEDGE/HYPOTHESIS(å¹¶è¡Œ) â†’ AGGREGATE
 5. è‡³å°‘ç”Ÿæˆä¸€ä¸ª Research Gapï¼›æœ€ç»ˆ `references` ä¸æ¯ä¸ª Gap çš„ `evidenceIds` åªèƒ½å¼•ç”¨è¾“å…¥è®ºæ–‡çš„ DOIã€PMID æˆ– URLï¼Œä¸” `references` å¿…é¡»è¦†ç›–å…¨éƒ¨ Gap æ¥æºã€‚
 
 ä¸‹æ¸¸å‡è®¾ç”Ÿæˆ Agent ä¸»è¦æ¶ˆè´¹ `selectedProblem`ã€`researchGaps`ã€`knownFindings`ã€`limitations`ã€`conflicts`ã€`transferOpportunities`ã€`paperTitle` å’Œ `paperAbstract`ã€‚ç®¡çº¿ç¼–æ’åªè´Ÿè´£ä¼ é€’è¿™äº›ç»“æ„åŒ–å­—æ®µï¼Œä¸éœ€è¦è§£æè‡ªç„¶è¯­è¨€æ®µè½ã€‚
+
+## Experiment stage
+
+ÊµÑéÉè¼ÆÍ¨¹ı ExperimentStage implements PipelineAgent ½ÓÈëÍ³Ò»Á÷Ë®Ïß£¬½×¶ÎÖµÎª EXPERIMENT¡£Ëü¶ÁÈ¡ PipelineContext µÄ evaluation ²¢Ğ´Èë experiment£¬Êä³öÊ¹ÓÃ PipelineModels.ExperimentResult µÄ baselines¡¢metrics¡¢datasets¡¢expectedResults ×Ö¶Î¡£ÊµÑéÄ£¿é²»Ìá¹©¶ÀÁ¢ Controller£¬¶ÔÍâÇëÇóÓÉ backend ×ª·¢¡£
