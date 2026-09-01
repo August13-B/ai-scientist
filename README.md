@@ -113,6 +113,18 @@ npm install
 npm run dev
 ```
 
+### 6. 运行 HypoLab 交互原型（可选）
+
+仓库同时保留一个独立的科研假设工作台原型，用于快速演示“研究上下文录入 → 方法增强 → 候选假设生成 → 评分与导出”的产品闭环。该原型不替换现有 Vue 3 前端，也不参与七 Agent 管线编排。
+
+```bash
+cd prototypes/hypolab-workbench
+npm install
+npm run dev
+```
+
+详细说明见 [`prototypes/README.md`](prototypes/README.md)。
+
 ## 📄 文档索引
 
 > 🔧 **接入代码前必读**：[AGENTS.md](AGENTS.md)（给 AI 编码助手的仓库接入指南）
@@ -142,5 +154,3 @@ npm run dev
 ## ⚖️ License
 
 [MIT](LICENSE)
-
-测试分支合并
