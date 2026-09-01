@@ -20,10 +20,7 @@
     <properties>
         <java.version>17</java.version>
         <langchain4j.version>1.18.1</langchain4j.version>
-<<<<<<< HEAD
         <checkstyle.skip>true</checkstyle.skip>
-=======
->>>>>>> origin/develop
     </properties>
 
     <dependencies>
