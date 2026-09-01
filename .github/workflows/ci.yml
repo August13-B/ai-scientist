@@ -1,0 +1,76 @@
+# AI Scientist 项目 CI：代码规范性审查 + 版本审查 + 编译测试
+# 触发时机：仅 Pull Request（PR 即审查关卡，配合团队「分支→PR→审核→合并」流程）
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  # ===================== Job 1: 版本审查 =====================
+  # 断言统一版本（SpringBoot 3.5.16 / Java 17 / LangChain4j 1.18.1），防止版本漂移
+  version-check:
+    name: 版本审查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验统一版本
+        run: |
+          set -e
+          # backend
+          grep -q '<version>3.5.16</version>' backend/pom.xml \
+            && echo "  [OK] backend SpringBoot 3.5.16"
+          grep -q '<java.version>17</java.version>' backend/pom.xml \
+            && echo "  [OK] backend Java 17"
+          # ai-service
+          grep -q '<version>3.5.16</version>' ai-service/pom.xml \
+            && echo "  [OK] ai-service SpringBoot 3.5.16"
+          grep -q '<java.version>17</java.version>' ai-service/pom.xml \
+            && echo "  [OK] ai-service Java 17"
+          grep -q '<langchain4j.version>1.18.1</langchain4j.version>' ai-service/pom.xml \
+            && echo "  [OK] ai-service LangChain4j 1.18.1"
+          echo "✅ 版本统一校验通过：SpringBoot 3.5.16 / Java 17 / LangChain4j 1.18.1"
+
+  # ===================== Job 2+3: Java 工程（编译+测试+Checkstyle）=====================
+  maven:
+    name: Maven 构建审查（${{ matrix.module }}）
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [backend, ai-service]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      # verify = 编译 + 单元测试 + Checkstyle 风格审查（绑定 verify 阶段）
+      - name: 编译 + 测试 + 代码规范性审查
+        run: mvn -f ${{ matrix.module }}/pom.xml verify --batch-mode --no-transfer-progress
+
+  # ===================== Job 4: 前端构建 =====================
+  frontend:
+    name: 前端构建审查
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package.json
+
+      - name: 安装依赖
+        run: npm install
+
+      - name: 构建（vue-tsc 类型检查 + vite build）
+        run: npm run build
