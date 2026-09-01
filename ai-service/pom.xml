@@ -39,17 +39,14 @@
             <artifactId>langchain4j</artifactId>
             <version>${langchain4j.version}</version>
         </dependency>
-        <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j-spring-boot-starter</artifactId>
-            <version>${langchain4j.version}</version>
-        </dependency>
         <!-- OpenAI 兼容接口（阿里云百炼） -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-open-ai</artifactId>
             <version>${langchain4j.version}</version>
         </dependency>
+        <!-- 注：langchain4j-spring-boot-starter 在 1.x 无稳定版（仅 beta），
+             暂不引入；Spring 集成（ChatModel Bean）由 BailianClient 手动配置实现 -->
 
         <!-- 向量库（开发 Chroma / 生产 Milvus，按需启用并补充版本） -->
         <!--
