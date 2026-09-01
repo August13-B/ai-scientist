@@ -115,6 +115,8 @@ npm run dev
 
 ## 📄 文档索引
 
+> 🔧 **接入代码前必读**：[AGENTS.md](AGENTS.md)（给 AI 编码助手的仓库接入指南）
+
 | 文档 | 内容 |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | 系统架构设计（四层 + 通信链路） |
