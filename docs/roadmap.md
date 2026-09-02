@@ -14,13 +14,18 @@
 | W5 | 8.18–8.24 | 数据质量审查、引用真实性逐条核验 | 全 Agent 联调优化 + 端到端典型案例跑通 | 前端美化 + Agent 思考流优化 | 3 个完整案例产出 |
 | W6 | 8.25–9.1 | 整理百炼 API 调用凭证截图；协助输出案例 | SFT 微调（可选）+ 性能优化 + 异常处理 | 技术方案 PDF 撰写 + 演示视频录制 | 提交就绪 |
 
-## 2. 当前状态（2026-08-05）
+## 2. 当前状态（2026-09-02 更新）
 
 - [x] 仓库初始化：骨架 + 全部设计文档
 - [x] 技术方案与分工共识已固化（docs/）
+- [x] **框架改造（方案 B）**：②∥③ 并行 → ④ 串行 → 人在回路 → ⑤⑥⑦（`PipelineEngine`）
+- [x] **人在回路落地**：`start()` 异步 + `pipeline.pause/resume` 事件 + `/pipeline/{runId}/resume` 端点（内存态）
+- [x] **SSE 事件**：`SseEventPublisher` 历史重放 + `GET /pipeline/{runId}/stream`
+- [x] **BailianClient 真实现**：百炼 OpenAI 兼容 API、60s 超时重试、模型分级路由、embed 接口（streamChat 待丁贾峻）
+- [x] **RagSearchService Chroma REST**：检索返回 PaperEvidence 契约（Milvus 待接入）
 - [ ] 科研方向最终确认（暂定：深度学习 × SSD 存储）
-- [ ] 百炼平台注册与 API Key（丁贾峻、马梓涵）
-- [ ] W3 收尾：方法库/证据库搭建、三 Agent 并行联调
+- [ ] 百炼平台注册与 API Key（丁贾峻、马梓涵）；agent.thinking token 流（streamChat）
+- [ ] 队友接入：②④⑤⑥⑦ Agent + backend 转发 + 前端 SSE 对接
 
 ## 3. 关键风险与行动项
 

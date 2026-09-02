@@ -3,9 +3,11 @@
 > 更新时间：2026-08-05（初版）
 > Agent 内部 Prompt 与 @Tool 实现细节由智能体组设计时确定，本文档只固化管线共识。
 
+> 更新时间：2026-09-02（第二版：方案 B 调度——②∥③ 并行 → ④ 串行，人在回路在 ④ 后）
+
 ## 1. 管线总览
 
-系统采用「串并结合」的编排策略：问题理解后**并行分发**到文献检索、知识发现、假设生成三个 Agent，合并后经评估 → 实验设计 → 辩论 → 输出。核心基于 **Java + LangChain4j**，使用 **DAG（有向无环图）** 逻辑管理 State 状态流转，各 Agent 封装为 `@Tool` 或 `@AiService`。
+系统采用「串并结合」的编排策略：问题理解后**并行分发**到文献检索、知识发现两个 Agent（互不依赖、各自自足 RAG），聚合后串行执行假设生成，再经人在回路 → 评估 → 实验设计 → 辩论 → 输出。核心基于 **Java + LangChain4j**，使用 **DAG（有向无环图）** 逻辑管理 State 状态流转，各 Agent 封装为 `@Tool` 或 `@AiService`。
 
 ```
 用户输入科研问题
@@ -13,13 +15,16 @@
     ▼
 ① 问题理解 Agent ──拆解为结构化子查询（领域标签/关键概念/已知条件/待求解变量）
     │
-    ├───────────┬───────────┬───────────┐
-    ▼           ▼           ▼           │
-② 文献检索   ③ 知识发现   ④ 假设生成    │
-   Agent       Agent       Agent        │  （并行执行）
-    │           │           │           │
-    └───────────┴─────┬─────┴───────────┘
-                      ▼
+    ├───────────┬───────────┐
+    ▼           ▼           │
+② 文献检索   ③ 知识发现    │  （并行执行，互不依赖，各自自足 RAG）
+   Agent       Agent        │
+    │           │           │
+    └─────┬─────┴─────┬─────┘
+          ▼           ▼
+       ④ 假设生成 Agent（串行，消费 ③ 的 Gap/选题 + ② 的文献）
+          │
+          ▼
         【人在回路暂停点：人类介入审阅】← 前端 Vue Flow 展示
                       │
                       ▼
@@ -52,20 +57,20 @@
 > 具体 State 字段由张睿（流水线总管）设计时确定，以下为状态机骨架。
 
 ```
-IDLE → UNDERSTANDING → RETRIEVING/KNOWLEDGE/HYPOTHESIS(并行) → AGGREGATED
-    → WAITING_HUMAN(人在回路) → EVALUATING → DESIGNING → DEBATING → DONE
+IDLE → UNDERSTANDING → RETRIEVING/KNOWLEDGE(并行) → AGGREGATED → HYPOTHESIS → WAITING_HUMAN(人在回路) → EVALUATING → DESIGNING → DEBATING → DONE
     └────────────────────────────── ERROR ──────────────────────┘
 ```
 
 - 每个状态对应一个/一组 Agent 的执行
-- `WAITING_HUMAN` 为人在回路暂停点：评估 Agent 生成假设后系统自动暂停，等待人类导师审阅修改后通过事件恢复
+- `WAITING_HUMAN` 为人在回路暂停点：**④ 假设生成后**系统暂停（发布 `pipeline.pause`），等待人类导师审阅候选假设，通过 `POST /pipeline/{runId}/resume` 提交审阅意见（可附修改后的候选假设）后恢复
 - 异常状态支持重试与断点恢复（由团队细化）
 
 ## 4. Agent 间数据流
 
 ```
 用户输入 → ① 子查询
-  → ② 文献列表(带引用) + ③ 研究空白/选题 + ④ 候选假设(带推理链)
+  → ② 文献列表(带引用) ∥ ③ 研究空白/选题（并行，自足 RAG）
+  → ④ 候选假设(带推理链，消费 ③ 的 Gap + ② 的文献)
   → [人在回路] 人类审阅意见
   → ⑤ 评分排序 + 幻觉检测结果 + 真实 References
   → ⑥ 实验方案(实验设计/数据集/预期结果)
@@ -112,8 +117,81 @@ IDLE → UNDERSTANDING → RETRIEVING/KNOWLEDGE/HYPOTHESIS(并行) → AGGREGATE
 
 1. 输入 `DiscoveryRequest(question, domain, evidence, topK)`；`evidence` 可为空。
 2. 有直接证据时优先分析；否则调用论文库 `RagSearchService.search("papers", question, topK)`。
+   **管线接入（方案 B）**：`KnowledgeDiscoveryStage` 与 ② 文献检索并行，为消除竞态恒传空 `evidence`，知识发现**自足 RAG** 检索，不再消费 ② 的 `LiteratureResult`。
 3. 直接证据与 RAG 返回对象都需包含 `title`、`content` 及 DOI/PMID/URL 中至少一种来源；Agent 按规范化来源标识去重，至少需要两篇不同来源论文。
 4. 三阶段分别输出 `EvidenceExtraction`、`CrossPaperAnalysis` 和 `DiscoveryResult`；证据提取必须逐篇一一覆盖输入来源。
 5. 至少生成一个 Research Gap；最终 `references` 与每个 Gap 的 `evidenceIds` 只能引用输入论文的 DOI、PMID 或 URL，且 `references` 必须覆盖全部 Gap 来源。
 
 下游假设生成 Agent 主要消费 `selectedProblem`、`researchGaps`、`knownFindings`、`limitations`、`conflicts`、`transferOpportunities`、`paperTitle` 和 `paperAbstract`。管线编排只负责传递这些结构化字段，不需要解析自然语言段落。
+
+### 7.2 实验设计 Agent（已接入）
+
+实验设计 Agent 通过 `ExperimentStage implements PipelineAgent` 接入统一流水线，声明阶段为 `AgentStage.EXPERIMENT`。Spring 自动收集该组件，`PipelineEngine` 按既定顺序调度；本模块不提供独立 Controller，对外请求统一由 `backend` 转发。
+
+#### 输入契约
+
+`ExperimentStage` 只读取 `PipelineContext#getEvaluation()`：
+
+1. `rankings` 必须至少包含一条已评分假设；Stage 按 `overall` 选择分数最高的假设。
+2. `references` 必须至少包含一个可追溯来源标识，格式限定为 `doi:...`、`pmid:...` 或 `http(s)://...`。
+3. 无法追溯的普通字符串会在调用模型前被拒绝，防止模型基于虚构引用设计实验。
+4. 研究领域优先读取 `PipelineContext#getQuestionQuery().domain()`；缺失时使用通用科学领域描述。
+
+#### 调用方式
+
+Stage 将最优假设、研究领域、主要结果变量和已验证来源构造成 `ExperimentRequest` 与 `Evidence`，然后调用 Spring 注入的 `ExperimentPlanGenerator`。生产实现为 `BailianExperimentPlanGenerator`，使用百炼 Qwen 生成结构化 JSON；Stage 不包含硬编码 baseline、指标、数据集或预期结果。
+
+模型返回内容必须包含：
+
+- 至少 3 个可复现实验基线；
+- 至少 5 个指标，包括主要指标、统计不确定性、效应量、稳健性和资源成本；
+- 至少 3 个真实数据集来源；
+- 至少 5 个实验步骤；
+- 至少 3 个待验证的预期结果；
+- 至少 3 个实验风险。
+
+模型返回非法 JSON 时生成器最多重试一次；连续失败或模型调用异常时终止当前阶段，不生成替代数据。
+
+#### 输出契约
+
+生成内容映射到 `PipelineModels.ExperimentResult`，并通过 `PipelineContext#setExperiment()` 写回：
+
+| 字段 | 来源与语义 |
+|---|---|
+| `baselines` | 直接取生成器的 `baselines`，表示公平、可复现的对照方法。 |
+| `metrics` | 直接取生成器的 `metrics`，表示主要指标及统计、稳健性和成本指标。 |
+| `datasets` | 直接取生成器的 `datasets`；每项必须包含数据集名称及可追溯的 HTTP/HTTPS URL。参考文献不得冒充数据集。 |
+| `expectedResults` | 将生成器的 `expectedResults` 合并为文本，描述预测范围或判定条件；不得复制假设摘要，也不得声称实验已经完成。 |
+
+`procedure`、`risks`、任务编号、运行编号、证据详情及 `actualResults` 属于实验模块扩展信息，不改变共享 `ExperimentResult` 契约。没有真实测量值时，扩展结果状态为 `NOT_EXECUTED`；只有提交真实观测值后才计算指标。
+
+#### 来源与语义校验
+
+1. 输入引用必须带 DOI、PMID 或 URL，且只能来自评估阶段的白名单结果。
+2. 数据集必须同时包含名称和 URL；缺少 URL 时拒绝写入流水线上下文。
+3. `expectedResults` 必须为模型生成的预测范围或判定条件，不能为空，也不能与最优假设文本相同。
+4. `datasets` 与 `references` 含义不同：前者是实验数据来源，后者是支持假设的论文或证据来源。
+5. Prompt 禁止虚构论文、DOI、PMID、数据集和已经发生的实验结果。
+
+#### 失败行为
+
+以下情况会抛出异常并中止 `EXPERIMENT` 阶段：
+
+- `evaluation` 缔失或没有已评分假设；
+- 没有可追溯引用，或引用不符合 DOI/PMID/URL 格式；
+- 模型调用失败或连续返回非法 JSON；
+- 数据集为空或缺少可追溯 URL；
+- 预期结果为空，或只是复制假设摘要；
+- 生成字段数量不足或包含空值。
+
+#### 测试
+
+- `ExperimentStageTest`：验证最优假设输入、真实生成器调用、共享契约映射、引用及字段语义校验。
+- `BailianExperimentPlanGeneratorTest`：直接 mock `ChatModel`，覆盖合法 JSON、非法 JSON 重试和上游模型异常。
+- `ExperimentDesignServiceTest`：覆盖证据检索、生成器调用、方案组装、无证据拒绝以及未执行结果状态。
+
+提交前执行：
+
+```powershell
+mvn -f ai-service/pom.xml verify --batch-mode --no-transfer-progress
+```

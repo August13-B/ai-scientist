@@ -11,10 +11,10 @@
 | 灌库公共模块 | ✅ 已实现 | `data/scripts/rag_common.py`（连接+Embedding）、`rag_base.py`（基类） |
 | 向量化 | ✅ 已定为百炼 DashScope Embedding API | `EMBEDDING_PROVIDER=dashscope`，模型 `text-embedding-v3` |
 | 向量库 | ✅ Chroma（开发）/ Milvus（生产）双支持 | `VECTOR_DB` 切换；docker-compose 已编排 |
-| 检索服务（RagSearchService） | ⚠️ 待实现 | `ai-service` 的 `rag/RagSearchService.java`（TODO） |
+| 检索服务（RagSearchService） | ✅ **Chroma REST 已实现**；Milvus 待接入 | `ai-service` 的 `rag/RagSearchService.java`：query 经百炼 embedding 后查 Chroma `/api/v1/collections/{name}/query`，返回 `PaperEvidence` 契约 |
 | 数据源（raw/processed） | ⚠️ 待马梓涵产数据 | 按 JSONL 格式产出（见第 4 节） |
 
-> ⚠️ **协作注意**：Agent 接入时如需 RAG 检索，检索结果字段必须与灌库脚本写入的元数据对齐（见第 5 节），否则 `objectMapper.convertValue` 转换失败。
+> ⚠️ **协作注意**：Agent 接入时如需 RAG 检索，检索结果**直接返回 `PaperEvidence`**（RagSearchService 已按灌库 metadata 契约映射：`source_id`/`title`/`year`/`venue`/`authors` + 分块文本），无需再做 `convertValue`。Milvus 模式（`VECTOR_DB=milvus`）会抛明确提示，待丁贾峻接入 SDK。
 
 ## 1. 四库总览
 
@@ -33,7 +33,7 @@
 | 文档解析 | pdfplumber + Grobid | 学术 PDF 结构化：提取标题、摘要、章节、参考文献 |
 | 向量化模型 | **DashScope Embedding API**（text-embedding-v3） | 已定稿：灌库脚本通过百炼在线向量化，维度 1024（可配） |
 | 分块策略 | 语义优先递归切分 | 优先段落、换行、句末、空格边界；`chunk_size=512, overlap=64`（脚本参数可覆盖） |
-| 检索策略 | 混合检索：向量相似度 + BM25 | 兼顾语义匹配与精确术语匹配（检索侧 TODO） |
+| 检索策略 | 混合检索：向量相似度 + BM25 | 兼顾语义匹配与精确术语命中（当前实现为向量检索；BM25 混合检索待补） |
 
 ## 3. 四库构建流程（骨架）
 
