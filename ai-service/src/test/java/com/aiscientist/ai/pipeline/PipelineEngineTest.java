@@ -1,11 +1,13 @@
 package com.aiscientist.ai.pipeline;
 
+import com.aiscientist.ai.agent.KnowledgeDiscoveryModels.DiscoveryResult;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -27,13 +29,13 @@ class PipelineEngineTest {
         // ①→②③④(并行)→⑤→⑥→⑦：记录执行顺序并断言边界
         List<String> order = Collections.synchronizedList(new ArrayList<>());
         PipelineEngine engine = new PipelineEngine(List.of(
-                agent(AgentStage.UNDERSTANDING, () -> order.add("understanding")),
-                agent(AgentStage.LITERATURE, () -> order.add("literature")),
-                agent(AgentStage.KNOWLEDGE, () -> order.add("knowledge")),
-                agent(AgentStage.HYPOTHESIS, () -> order.add("hypothesis")),
-                agent(AgentStage.EVALUATION, () -> order.add("evaluation")),
-                agent(AgentStage.EXPERIMENT, () -> order.add("experiment")),
-                agent(AgentStage.DEBATE, () -> order.add("debate"))
+                agent(AgentStage.UNDERSTANDING, ctx -> order.add("understanding")),
+                agent(AgentStage.LITERATURE, ctx -> order.add("literature")),
+                agent(AgentStage.KNOWLEDGE, ctx -> order.add("knowledge")),
+                agent(AgentStage.HYPOTHESIS, ctx -> order.add("hypothesis")),
+                agent(AgentStage.EVALUATION, ctx -> order.add("evaluation")),
+                agent(AgentStage.EXPERIMENT, ctx -> order.add("experiment")),
+                agent(AgentStage.DEBATE, ctx -> order.add("debate"))
         ));
 
         PipelineContext ctx = engine.run("  如何提升水稻病害模型泛化能力？  ");
@@ -64,7 +66,7 @@ class PipelineEngineTest {
         // 专项并发验证：若并行组被误改为串行，同一时刻最多只有 1 个 Agent 在执行
         AtomicInteger active = new AtomicInteger();
         AtomicInteger maxActive = new AtomicInteger();
-        Runnable overlap = () -> {
+        Consumer<PipelineContext> overlap = ctx -> {
             int current = active.incrementAndGet();
             maxActive.accumulateAndGet(current, Math::max);
             try {
@@ -76,16 +78,16 @@ class PipelineEngineTest {
             }
         };
         PipelineEngine engine = new PipelineEngine(List.of(
-                agent(AgentStage.UNDERSTANDING, () -> {
+                agent(AgentStage.UNDERSTANDING, ctx -> {
                 }),
                 agent(AgentStage.LITERATURE, overlap),
                 agent(AgentStage.KNOWLEDGE, overlap),
                 agent(AgentStage.HYPOTHESIS, overlap),
-                agent(AgentStage.EVALUATION, () -> {
+                agent(AgentStage.EVALUATION, ctx -> {
                 }),
-                agent(AgentStage.EXPERIMENT, () -> {
+                agent(AgentStage.EXPERIMENT, ctx -> {
                 }),
-                agent(AgentStage.DEBATE, () -> {
+                agent(AgentStage.DEBATE, ctx -> {
                 })
         ));
 
@@ -99,8 +101,8 @@ class PipelineEngineTest {
     void skipsStagesWithoutAgents() {
         // 当前仓库真实状态：仅知识发现已接入，其余阶段应自动跳过不影响管线
         PipelineEngine engine = new PipelineEngine(List.of(
-                agent(AgentStage.KNOWLEDGE, () -> {
-                })));
+                agent(AgentStage.KNOWLEDGE, ctx -> ctx.setKnowledgeDiscovery(
+                        discoveryResult()))));
 
         PipelineContext ctx = engine.run("研究问题");
 
@@ -115,10 +117,10 @@ class PipelineEngineTest {
         // 某 Agent 抛异常 → 包装为 IllegalStateException，后续阶段不再执行
         List<String> order = Collections.synchronizedList(new ArrayList<>());
         PipelineEngine engine = new PipelineEngine(List.of(
-                agent(AgentStage.UNDERSTANDING, () -> {
+                agent(AgentStage.UNDERSTANDING, ctx -> {
                     throw new IllegalStateException("模型返回无效");
                 }),
-                agent(AgentStage.EVALUATION, () -> order.add("evaluation"))
+                agent(AgentStage.EVALUATION, ctx -> order.add("evaluation"))
         ));
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
@@ -147,17 +149,17 @@ class PipelineEngineTest {
         assertThrows(IllegalArgumentException.class, () -> engine.resume(null));
     }
 
-    /** 假 Agent：记录执行顺序或执行自定义动作 */
-    private static RecordingAgent agent(AgentStage stage, Runnable action) {
+    /** 假 Agent：记录执行顺序或执行自定义动作（动作可访问数据总线 ctx） */
+    private static RecordingAgent agent(AgentStage stage, Consumer<PipelineContext> action) {
         return new RecordingAgent(stage, action);
     }
 
     private static final class RecordingAgent implements PipelineAgent {
 
         private final AgentStage stage;
-        private final Runnable action;
+        private final Consumer<PipelineContext> action;
 
-        RecordingAgent(AgentStage stage, Runnable action) {
+        RecordingAgent(AgentStage stage, Consumer<PipelineContext> action) {
             this.stage = stage;
             this.action = action;
         }
@@ -169,7 +171,17 @@ class PipelineEngineTest {
 
         @Override
         public void execute(PipelineContext ctx) {
-            action.run();
+            action.accept(ctx);
         }
+    }
+
+    /** 最小知识发现产物（completedStages 依据数据总线产物判断） */
+    private static DiscoveryResult discoveryResult() {
+        return new DiscoveryResult(
+                List.of(), List.of(), List.of(), List.of(), List.of(),
+                "如何提升水稻病害模型泛化能力？",
+                "跨地区小样本水稻病害识别",
+                "研究跨地区小样本条件下的水稻病害识别方法。",
+                List.of("doi:10.1000/a"));
     }
 }
