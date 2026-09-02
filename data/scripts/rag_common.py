@@ -8,12 +8,49 @@
 """
 
 import os
+import json
 
 try:
     from dotenv import load_dotenv
     load_dotenv()  # 读取仓库根目录 .env（不进 git）
 except ImportError:
     pass
+
+
+def normalize_source(doi=None, pmid=None, url=None) -> str:
+    """规范来源 ID，供四库写入与检索侧引用核验共同使用。"""
+    if doi and str(doi).strip():
+        value = str(doi).strip()
+        prefixes = (
+            "doi:", "https://doi.org/", "http://doi.org/",
+            "https://dx.doi.org/", "http://dx.doi.org/",
+        )
+        for prefix in prefixes:
+            if value.lower().startswith(prefix):
+                value = value[len(prefix):]
+                break
+        return f"doi:{value.lower()}"
+    if pmid and str(pmid).strip():
+        value = str(pmid).strip()
+        if value.lower().startswith("pmid:"):
+            value = value[5:].strip()
+        return f"pmid:{value}"
+    if url and str(url).strip():
+        return f"url:{str(url).strip()}"
+    raise ValueError("每条记录必须包含 doi / pmid / url 至少一种来源标识")
+
+
+def sanitize_metadata(metadata: dict) -> dict:
+    """移除空值并转换为 Chroma 与 Milvus 都可接受的元数据类型。"""
+    cleaned = {}
+    for key, value in metadata.items():
+        if value is None:
+            continue
+        if isinstance(value, (str, int, float, bool)):
+            cleaned[key] = value
+        else:
+            cleaned[key] = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return cleaned
 
 
 # ==================== 向量库连接 ====================

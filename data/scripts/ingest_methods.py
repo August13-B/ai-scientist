@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rag_base import BaseIngester, main  # noqa: E402
+from rag_common import normalize_source  # noqa: E402
 
 
 class MethodsIngester(BaseIngester):
@@ -44,15 +45,7 @@ class MethodsIngester(BaseIngester):
 
         # 方法条目为结构化短文本，整条作为一个 chunk（不超过 chunk_size 时不拆分）
         text = f"方法：{name}\n适用场景：{scenario}\n实施步骤：{steps}\n评估结果：{evaluation}"
-        chunks = self.split_text(text, self.CHUNK_SIZE, self.CHUNK_OVERLAP)
-        return [{"text": c, "metadata": dict(metadata)} for c in chunks]
-
-
-def normalize_source(doi=None, pmid=None, url=None) -> str:
-    for value, prefix in ((doi, "doi:"), (pmid, "pmid:"), (url, "url:")):
-        if value and str(value).strip():
-            return f"{prefix}{str(value).strip()}"
-    raise ValueError("每条方法条目必须包含 source_doi / source_pmid / source_url 至少一种")
+        return self.create_chunk_payloads(text, metadata)
 
 
 if __name__ == "__main__":

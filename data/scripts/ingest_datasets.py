@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rag_base import BaseIngester, main  # noqa: E402
+from rag_common import normalize_source  # noqa: E402
 
 
 class DatasetsIngester(BaseIngester):
@@ -33,11 +34,8 @@ class DatasetsIngester(BaseIngester):
         annotation = record.get("annotation") or ""
         url = record.get("url")
 
-        if not url:
-            raise ValueError(f"数据集 [{name}] 缺少 url 来源标识")
-
         metadata = {
-            "source_id": f"url:{url.strip()}",
+            "source_id": normalize_source(doi=record.get("doi"), pmid=record.get("pmid"), url=url),
             "name": name,
             "features": features,
             "samples": samples,
@@ -48,8 +46,7 @@ class DatasetsIngester(BaseIngester):
             f"数据集：{name}\n特征维度：{features}\n样本量：{samples}\n"
             f"标注方式：{annotation}\n来源：{url}"
         )
-        chunks = self.split_text(text, self.CHUNK_SIZE, self.CHUNK_OVERLAP)
-        return [{"text": c, "metadata": dict(metadata)} for c in chunks]
+        return self.create_chunk_payloads(text, metadata)
 
 
 if __name__ == "__main__":
