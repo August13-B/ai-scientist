@@ -2,7 +2,6 @@ package com.aiscientist.ai.pipeline;
 
 import com.aiscientist.ai.agent.KnowledgeDiscoveryAgent;
 import com.aiscientist.ai.agent.KnowledgeDiscoveryModels.DiscoveryRequest;
-import com.aiscientist.ai.agent.KnowledgeDiscoveryModels.PaperEvidence;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -32,11 +31,7 @@ public class KnowledgeDiscoveryStage implements PipelineAgent {
 
     @Override
     public void execute(PipelineContext ctx) {
-        // 输入：科研问题 + ②文献检索产物（未实现时为空，走 RAG 回退）
-        List<PaperEvidence> evidence = ctx.getLiterature() == null
-                ? List.of()
-                : ctx.getLiterature().papers();
-
+        // 输入：科研问题（②③ 并行，知识发现自足 RAG，不依赖 ② 文献检索产物，避免竞态）
         String domain = ctx.getQuestionQuery() == null
                 ? null
                 : ctx.getQuestionQuery().domain();
@@ -44,7 +39,7 @@ public class KnowledgeDiscoveryStage implements PipelineAgent {
         DiscoveryRequest request = new DiscoveryRequest(
                 ctx.getQuestion(),
                 domain,
-                evidence,
+                List.of(),
                 5
         );
 
