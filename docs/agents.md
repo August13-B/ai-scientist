@@ -123,3 +123,75 @@ IDLE → UNDERSTANDING → RETRIEVING/KNOWLEDGE(并行) → AGGREGATED → HYPOT
 5. 至少生成一个 Research Gap；最终 `references` 与每个 Gap 的 `evidenceIds` 只能引用输入论文的 DOI、PMID 或 URL，且 `references` 必须覆盖全部 Gap 来源。
 
 下游假设生成 Agent 主要消费 `selectedProblem`、`researchGaps`、`knownFindings`、`limitations`、`conflicts`、`transferOpportunities`、`paperTitle` 和 `paperAbstract`。管线编排只负责传递这些结构化字段，不需要解析自然语言段落。
+
+### 7.2 实验设计 Agent（已接入）
+
+实验设计 Agent 通过 `ExperimentStage implements PipelineAgent` 接入统一流水线，声明阶段为 `AgentStage.EXPERIMENT`。Spring 自动收集该组件，`PipelineEngine` 按既定顺序调度；本模块不提供独立 Controller，对外请求统一由 `backend` 转发。
+
+#### 输入契约
+
+`ExperimentStage` 只读取 `PipelineContext#getEvaluation()`：
+
+1. `rankings` 必须至少包含一条已评分假设；Stage 按 `overall` 选择分数最高的假设。
+2. `references` 必须至少包含一个可追溯来源标识，格式限定为 `doi:...`、`pmid:...` 或 `http(s)://...`。
+3. 无法追溯的普通字符串会在调用模型前被拒绝，防止模型基于虚构引用设计实验。
+4. 研究领域优先读取 `PipelineContext#getQuestionQuery().domain()`；缺失时使用通用科学领域描述。
+
+#### 调用方式
+
+Stage 将最优假设、研究领域、主要结果变量和已验证来源构造成 `ExperimentRequest` 与 `Evidence`，然后调用 Spring 注入的 `ExperimentPlanGenerator`。生产实现为 `BailianExperimentPlanGenerator`，使用百炼 Qwen 生成结构化 JSON；Stage 不包含硬编码 baseline、指标、数据集或预期结果。
+
+模型返回内容必须包含：
+
+- 至少 3 个可复现实验基线；
+- 至少 5 个指标，包括主要指标、统计不确定性、效应量、稳健性和资源成本；
+- 至少 3 个真实数据集来源；
+- 至少 5 个实验步骤；
+- 至少 3 个待验证的预期结果；
+- 至少 3 个实验风险。
+
+模型返回非法 JSON 时生成器最多重试一次；连续失败或模型调用异常时终止当前阶段，不生成替代数据。
+
+#### 输出契约
+
+生成内容映射到 `PipelineModels.ExperimentResult`，并通过 `PipelineContext#setExperiment()` 写回：
+
+| 字段 | 来源与语义 |
+|---|---|
+| `baselines` | 直接取生成器的 `baselines`，表示公平、可复现的对照方法。 |
+| `metrics` | 直接取生成器的 `metrics`，表示主要指标及统计、稳健性和成本指标。 |
+| `datasets` | 直接取生成器的 `datasets`；每项必须包含数据集名称及可追溯的 HTTP/HTTPS URL。参考文献不得冒充数据集。 |
+| `expectedResults` | 将生成器的 `expectedResults` 合并为文本，描述预测范围或判定条件；不得复制假设摘要，也不得声称实验已经完成。 |
+
+`procedure`、`risks`、任务编号、运行编号、证据详情及 `actualResults` 属于实验模块扩展信息，不改变共享 `ExperimentResult` 契约。没有真实测量值时，扩展结果状态为 `NOT_EXECUTED`；只有提交真实观测值后才计算指标。
+
+#### 来源与语义校验
+
+1. 输入引用必须带 DOI、PMID 或 URL，且只能来自评估阶段的白名单结果。
+2. 数据集必须同时包含名称和 URL；缺少 URL 时拒绝写入流水线上下文。
+3. `expectedResults` 必须为模型生成的预测范围或判定条件，不能为空，也不能与最优假设文本相同。
+4. `datasets` 与 `references` 含义不同：前者是实验数据来源，后者是支持假设的论文或证据来源。
+5. Prompt 禁止虚构论文、DOI、PMID、数据集和已经发生的实验结果。
+
+#### 失败行为
+
+以下情况会抛出异常并中止 `EXPERIMENT` 阶段：
+
+- `evaluation` 缔失或没有已评分假设；
+- 没有可追溯引用，或引用不符合 DOI/PMID/URL 格式；
+- 模型调用失败或连续返回非法 JSON；
+- 数据集为空或缺少可追溯 URL；
+- 预期结果为空，或只是复制假设摘要；
+- 生成字段数量不足或包含空值。
+
+#### 测试
+
+- `ExperimentStageTest`：验证最优假设输入、真实生成器调用、共享契约映射、引用及字段语义校验。
+- `BailianExperimentPlanGeneratorTest`：直接 mock `ChatModel`，覆盖合法 JSON、非法 JSON 重试和上游模型异常。
+- `ExperimentDesignServiceTest`：覆盖证据检索、生成器调用、方案组装、无证据拒绝以及未执行结果状态。
+
+提交前执行：
+
+```powershell
+mvn -f ai-service/pom.xml verify --batch-mode --no-transfer-progress
+```
