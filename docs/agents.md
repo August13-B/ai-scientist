@@ -3,9 +3,11 @@
 > 更新时间：2026-08-05（初版）
 > Agent 内部 Prompt 与 @Tool 实现细节由智能体组设计时确定，本文档只固化管线共识。
 
+> 更新时间：2026-09-02（第二版：方案 B 调度——②∥③ 并行 → ④ 串行，人在回路在 ④ 后）
+
 ## 1. 管线总览
 
-系统采用「串并结合」的编排策略：问题理解后**并行分发**到文献检索、知识发现、假设生成三个 Agent，合并后经评估 → 实验设计 → 辩论 → 输出。核心基于 **Java + LangChain4j**，使用 **DAG（有向无环图）** 逻辑管理 State 状态流转，各 Agent 封装为 `@Tool` 或 `@AiService`。
+系统采用「串并结合」的编排策略：问题理解后**并行分发**到文献检索、知识发现两个 Agent（互不依赖、各自自足 RAG），聚合后串行执行假设生成，再经人在回路 → 评估 → 实验设计 → 辩论 → 输出。核心基于 **Java + LangChain4j**，使用 **DAG（有向无环图）** 逻辑管理 State 状态流转，各 Agent 封装为 `@Tool` 或 `@AiService`。
 
 ```
 用户输入科研问题
@@ -13,13 +15,16 @@
     ▼
 ① 问题理解 Agent ──拆解为结构化子查询（领域标签/关键概念/已知条件/待求解变量）
     │
-    ├───────────┬───────────┬───────────┐
-    ▼           ▼           ▼           │
-② 文献检索   ③ 知识发现   ④ 假设生成    │
-   Agent       Agent       Agent        │  （并行执行）
-    │           │           │           │
-    └───────────┴─────┬─────┴───────────┘
-                      ▼
+    ├───────────┬───────────┐
+    ▼           ▼           │
+② 文献检索   ③ 知识发现    │  （并行执行，互不依赖，各自自足 RAG）
+   Agent       Agent        │
+    │           │           │
+    └─────┬─────┴─────┬─────┘
+          ▼           ▼
+       ④ 假设生成 Agent（串行，消费 ③ 的 Gap/选题 + ② 的文献）
+          │
+          ▼
         【人在回路暂停点：人类介入审阅】← 前端 Vue Flow 展示
                       │
                       ▼
@@ -52,20 +57,20 @@
 > 具体 State 字段由张睿（流水线总管）设计时确定，以下为状态机骨架。
 
 ```
-IDLE → UNDERSTANDING → RETRIEVING/KNOWLEDGE/HYPOTHESIS(并行) → AGGREGATED
-    → WAITING_HUMAN(人在回路) → EVALUATING → DESIGNING → DEBATING → DONE
+IDLE → UNDERSTANDING → RETRIEVING/KNOWLEDGE(并行) → AGGREGATED → HYPOTHESIS → WAITING_HUMAN(人在回路) → EVALUATING → DESIGNING → DEBATING → DONE
     └────────────────────────────── ERROR ──────────────────────┘
 ```
 
 - 每个状态对应一个/一组 Agent 的执行
-- `WAITING_HUMAN` 为人在回路暂停点：评估 Agent 生成假设后系统自动暂停，等待人类导师审阅修改后通过事件恢复
+- `WAITING_HUMAN` 为人在回路暂停点：**④ 假设生成后**系统暂停（发布 `pipeline.pause`），等待人类导师审阅候选假设，通过 `POST /pipeline/{runId}/resume` 提交审阅意见（可附修改后的候选假设）后恢复
 - 异常状态支持重试与断点恢复（由团队细化）
 
 ## 4. Agent 间数据流
 
 ```
 用户输入 → ① 子查询
-  → ② 文献列表(带引用) + ③ 研究空白/选题 + ④ 候选假设(带推理链)
+  → ② 文献列表(带引用) ∥ ③ 研究空白/选题（并行，自足 RAG）
+  → ④ 候选假设(带推理链，消费 ③ 的 Gap + ② 的文献)
   → [人在回路] 人类审阅意见
   → ⑤ 评分排序 + 幻觉检测结果 + 真实 References
   → ⑥ 实验方案(实验设计/数据集/预期结果)
@@ -112,6 +117,7 @@ IDLE → UNDERSTANDING → RETRIEVING/KNOWLEDGE/HYPOTHESIS(并行) → AGGREGATE
 
 1. 输入 `DiscoveryRequest(question, domain, evidence, topK)`；`evidence` 可为空。
 2. 有直接证据时优先分析；否则调用论文库 `RagSearchService.search("papers", question, topK)`。
+   **管线接入（方案 B）**：`KnowledgeDiscoveryStage` 与 ② 文献检索并行，为消除竞态恒传空 `evidence`，知识发现**自足 RAG** 检索，不再消费 ② 的 `LiteratureResult`。
 3. 直接证据与 RAG 返回对象都需包含 `title`、`content` 及 DOI/PMID/URL 中至少一种来源；Agent 按规范化来源标识去重，至少需要两篇不同来源论文。
 4. 三阶段分别输出 `EvidenceExtraction`、`CrossPaperAnalysis` 和 `DiscoveryResult`；证据提取必须逐篇一一覆盖输入来源。
 5. 至少生成一个 Research Gap；最终 `references` 与每个 Gap 的 `evidenceIds` 只能引用输入论文的 DOI、PMID 或 URL，且 `references` 必须覆盖全部 Gap 来源。

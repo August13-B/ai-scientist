@@ -144,6 +144,28 @@ public final class PipelineModels {
         }
     }
 
+    // ==================== 人在回路（Human-in-the-Loop）====================
+
+    /**
+     * 人类审阅意见（暂停点 resume 时提交）。
+     * <p>语义：人类在 ④ 假设生成后审阅候选假设，可仅确认（两字段皆空）、
+     * 可附审阅意见、可提交修改后的候选假设列表（替换或追加到 ④ 输出，
+     * 供 ⑤ 评估与 ⑦ 辩论消费）。字段均为可选。</p>
+     */
+    public record HumanFeedback(
+            String reviewComment,
+            List<Hypothesis> revisedHypotheses
+    ) {
+        public HumanFeedback {
+            reviewComment = hasText(reviewComment) ? reviewComment.trim() : null;
+            revisedHypotheses = immutable(revisedHypotheses);
+        }
+
+        public boolean isEmpty() {
+            return reviewComment == null && revisedHypotheses.isEmpty();
+        }
+    }
+
     // ==================== ⑦ 思辨辩论 Agent 输出 ====================
 
     /** 辩论纪要 + 对研究计划的完善意见 */
@@ -163,6 +185,10 @@ public final class PipelineModels {
             throw new IllegalArgumentException(field + " must not be blank");
         }
         return value.trim();
+    }
+
+    static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     static <T> List<T> immutable(List<T> values) {

@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -14,19 +16,20 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * 编排引擎单元测试（防回归：队友接入 Agent 时不得破坏调度顺序/并行/异常中断）。
+ * 编排引擎单元测试（防回归：队友接入 Agent 时不得破坏调度顺序/并行/异常中断/人在回路）。
  *
  * <p>测试策略（纯单元测试，不启动 Spring 上下文）：
  * 用 {@link RecordingAgent} 假 Agent 注入 {@link PipelineEngine}，
- * 验证编排顺序、并行调度、阶段缺失跳过与异常传播。</p>
+ * 验证编排顺序（方案 B：②∥③ → ④ 串行）、并发调度、阶段缺失跳过、异常传播与人在回路。</p>
  */
 class PipelineEngineTest {
 
     @Test
-    void runsStagesInPipelineOrderWithParallelMiddleGroup() {
-        // ①→②③④(并行)→⑤→⑥→⑦：记录执行顺序并断言边界
+    void runsStagesInPipelineOrderWithParallelTwoThenSerialHypothesis() {
+        // ①→(②∥③)→④→⑤→⑥→⑦：记录执行顺序并断言边界（方案 B）
         List<String> order = Collections.synchronizedList(new ArrayList<>());
         PipelineEngine engine = new PipelineEngine(List.of(
                 agent(AgentStage.UNDERSTANDING, ctx -> order.add("understanding")),
@@ -51,19 +54,20 @@ class PipelineEngineTest {
         }
         // ① 必须最先执行
         assertEquals("understanding", order.get(0));
-        // 并行组（②③④）必须在 ⑤ 之前聚合完成
+        // 并行组（②③）必须在 ④ 之前聚合完成（④ 串行消费 ③ 的 Gap）
+        int hypothesis = order.indexOf("hypothesis");
+        assertTrue(order.indexOf("literature") < hypothesis, "② 应先于 ④");
+        assertTrue(order.indexOf("knowledge") < hypothesis, "③ 应先于 ④");
+        // ④ 在 ⑤ 之前，⑤⑥⑦ 串行顺序
         int evaluation = order.indexOf("evaluation");
-        assertTrue(order.indexOf("literature") < evaluation);
-        assertTrue(order.indexOf("knowledge") < evaluation);
-        assertTrue(order.indexOf("hypothesis") < evaluation);
-        // ⑤⑥⑦ 串行顺序
+        assertTrue(hypothesis < evaluation, "④ 应先于 ⑤");
         assertTrue(evaluation < order.indexOf("experiment"));
         assertTrue(order.indexOf("experiment") < order.indexOf("debate"));
     }
 
     @Test
     void executesParallelStagesConcurrently() {
-        // 专项并发验证：若并行组被误改为串行，同一时刻最多只有 1 个 Agent 在执行
+        // 专项并发验证：②③ 若被误改为串行，同一时刻最多只有 1 个 Agent 在执行
         AtomicInteger active = new AtomicInteger();
         AtomicInteger maxActive = new AtomicInteger();
         Consumer<PipelineContext> overlap = ctx -> {
@@ -82,7 +86,8 @@ class PipelineEngineTest {
                 }),
                 agent(AgentStage.LITERATURE, overlap),
                 agent(AgentStage.KNOWLEDGE, overlap),
-                agent(AgentStage.HYPOTHESIS, overlap),
+                agent(AgentStage.HYPOTHESIS, ctx -> {
+                }),
                 agent(AgentStage.EVALUATION, ctx -> {
                 }),
                 agent(AgentStage.EXPERIMENT, ctx -> {
@@ -94,7 +99,7 @@ class PipelineEngineTest {
         engine.run("研究问题");
 
         assertTrue(maxActive.get() >= 2,
-                "②③④ 未重叠执行（并发峰值=" + maxActive.get() + "），疑似被串行化");
+                "②③ 未重叠执行（并发峰值=" + maxActive.get() + "），疑似被串行化");
     }
 
     @Test
@@ -143,11 +148,86 @@ class PipelineEngineTest {
     }
 
     @Test
-    void rejectsNullContextOnResume() {
+    void rejectsUnknownRunIdOnResumeStateAndCompletion() {
         PipelineEngine engine = new PipelineEngine(List.of());
 
-        assertThrows(IllegalArgumentException.class, () -> engine.resume(null));
+        assertThrows(IllegalArgumentException.class,
+                () -> engine.resume("unknown-run",
+                        new PipelineModels.HumanFeedback("意见", List.of())));
+        assertThrows(IllegalArgumentException.class, () -> engine.state("unknown-run"));
+        assertThrows(IllegalArgumentException.class, () -> engine.completion("unknown-run"));
     }
+
+    @Test
+    void asynchronousStartPausesAtHumanLoopAndResumesToDone() throws Exception {
+        // 人在回路：start() 后台执行 → ④ 后发 pipeline.pause 阻塞 → resume 释放 → done
+        TestEventPublisher publisher = new TestEventPublisher();
+        PipelineEngine engine = new PipelineEngine(List.of(
+                agent(AgentStage.UNDERSTANDING, ctx -> {
+                }),
+                agent(AgentStage.KNOWLEDGE, ctx -> ctx.setKnowledgeDiscovery(discoveryResult())),
+                agent(AgentStage.HYPOTHESIS, ctx -> ctx.setHypothesis(hypothesisResult())),
+                agent(AgentStage.EVALUATION, ctx -> {
+                })
+        ), publisher);
+
+        String runId = engine.start("研究问题");
+
+        // 等待暂停点：④ 已产出、pipeline.pause 已发布、⑤ 未执行
+        awaitEvent(publisher, "pipeline.pause", 5);
+        assertNotNull(engine.state(runId).getHypothesis(), "暂停点应位于 ④ 之后");
+        assertTrue(publisher.events().stream().noneMatch(
+                event -> event.eventType().equals("pipeline.done")));
+
+        // 人类提交审阅意见后恢复
+        engine.resume(runId, new PipelineModels.HumanFeedback("否决假设一，保留假设二", List.of()));
+
+        // 管线继续至完成
+        engine.completion(runId).get(5, TimeUnit.SECONDS);
+        assertTrue(publisher.events().stream().anyMatch(
+                event -> event.eventType().equals("pipeline.done")));
+        assertNotNull(engine.state(runId).getFinalReport());
+        assertEquals("否决假设一，保留假设二",
+                engine.state(runId).getHumanFeedback().reviewComment());
+        assertTrue(publisher.events().stream().anyMatch(
+                event -> event.eventType().equals("pipeline.resume")));
+    }
+
+    @Test
+    void synchronousRunSkipsHumanPause() {
+        // 同步 run()（测试/内部调用）不注册暂停处理器，自动放行
+        TestEventPublisher publisher = new TestEventPublisher();
+        PipelineEngine engine = new PipelineEngine(List.of(
+                agent(AgentStage.KNOWLEDGE, ctx -> ctx.setKnowledgeDiscovery(discoveryResult()))
+        ), publisher);
+
+        PipelineContext ctx = engine.run("研究问题");
+
+        assertFalse(publisher.events().stream().anyMatch(
+                event -> event.eventType().equals("pipeline.pause")),
+                "同步模式不应触发人在回路暂停");
+        assertNotNull(ctx.getFinalReport());
+    }
+
+    @Test
+    void failurePublishesPipelineErrorEvent() throws Exception {
+        // 异步模式：阶段失败发布 pipeline.error，且可被 completion 观察到
+        TestEventPublisher publisher = new TestEventPublisher();
+        PipelineEngine engine = new PipelineEngine(List.of(
+                agent(AgentStage.UNDERSTANDING, ctx -> {
+                    throw new IllegalStateException("模型返回无效");
+                })
+        ), publisher);
+
+        String runId = engine.start("研究问题");
+
+        assertThrows(java.util.concurrent.ExecutionException.class,
+                () -> engine.completion(runId).get(5, TimeUnit.SECONDS));
+        assertTrue(publisher.events().stream().anyMatch(
+                event -> event.eventType().equals("pipeline.error")));
+    }
+
+    // ==================== 测试工具 ====================
 
     /** 假 Agent：记录执行顺序或执行自定义动作（动作可访问数据总线 ctx） */
     private static RecordingAgent agent(AgentStage stage, Consumer<PipelineContext> action) {
@@ -175,6 +255,41 @@ class PipelineEngineTest {
         }
     }
 
+    /** 事件发布器测试替身：记录全部事件 */
+    private static final class TestEventPublisher implements EventPublisher {
+
+        private final List<TestEvent> events = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void publish(String taskId, String eventType, Object data) {
+            events.add(new TestEvent(eventType, String.valueOf(data)));
+        }
+
+        List<TestEvent> events() {
+            return events;
+        }
+    }
+
+    private record TestEvent(String eventType, String data) {
+    }
+
+    /** 轮询等待指定事件出现（10ms 间隔，超时抛断言失败） */
+    private static void awaitEvent(TestEventPublisher publisher, String eventType, int seconds) {
+        long deadline = System.currentTimeMillis() + seconds * 1000L;
+        while (System.currentTimeMillis() < deadline) {
+            if (publisher.events().stream().anyMatch(event -> event.eventType().equals(eventType))) {
+                return;
+            }
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                fail("等待事件被打断: " + eventType);
+            }
+        }
+        fail("超时未等到事件: " + eventType);
+    }
+
     /** 最小知识发现产物（completedStages 依据数据总线产物判断） */
     private static DiscoveryResult discoveryResult() {
         return new DiscoveryResult(
@@ -183,5 +298,17 @@ class PipelineEngineTest {
                 "跨地区小样本水稻病害识别",
                 "研究跨地区小样本条件下的水稻病害识别方法。",
                 List.of("doi:10.1000/a"));
+    }
+
+    /** 最小假设生成产物（人在回路暂停点断言用） */
+    private static PipelineModels.HypothesisResult hypothesisResult() {
+        return new PipelineModels.HypothesisResult(List.of(
+                new PipelineModels.Hypothesis(
+                        "候选假设一",
+                        "基于迁移学习提升泛化",
+                        List.of("预训练", "微调"),
+                        List.of("迁移学习"),
+                        List.of("证据A", "证据B"),
+                        List.of("doi:10.1000/a"))));
     }
 }

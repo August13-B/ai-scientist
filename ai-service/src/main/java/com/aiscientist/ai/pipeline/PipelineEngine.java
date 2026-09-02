@@ -4,18 +4,24 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.stream.Collectors;
 
 /**
  * 七 Agent 管线编排引擎（DAG 调度）。
  *
- * <p>执行顺序（对应 docs/agents.md 编排图）：</p>
+ * <p>执行顺序（方案 B，对应 docs/agents.md 编排图）：</p>
  * <pre>
  * ① 问题理解
- *   → ② 文献检索 / ③ 知识发现 / ④ 假设生成  【并行】
+ *   → ② 文献检索 / ③ 知识发现  【并行，互不依赖、各自自足 RAG】
+ *   → ④ 假设生成（串行，消费 ③ 的 Research Gap / 选题）
  *   → 【人在回路暂停点：WAITING_HUMAN】
  *   → ⑤ 科学假设评估
  *   → ⑥ 实验设计
@@ -26,72 +32,162 @@ import java.util.stream.Collectors;
  * <p>Agent 可插拔：所有实现 {@link PipelineAgent} 的 Spring Bean 会被自动收集，
  * 按 {@link AgentStage} 分组调度。某阶段暂无人实现则自动跳过，不影响管线运行。</p>
  *
- * <p>人在回路：并行阶段聚合后暂停，发布 {@code pipeline.pause} 事件；
- * 外部调用 {@link #resume(PipelineContext)} 继续。未配置 HumanInLoop 处理器时默认放行。</p>
+ * <p>人在回路（异步模式）：{@link #start(String)} 立即返回 runId 并在后台执行管线；
+ * 并行组与 ④ 聚合后发布 {@code pipeline.pause} 事件并阻塞等待，外部调用
+ * {@link #resume(String, PipelineModels.HumanFeedback)} 释放。同步模式
+ * {@link #run(String)}（供测试/内部调用）不注册暂停处理器，自动放行。</p>
  *
- * <p>TODO（张睿）：SSE 事件对接前端、State 持久化与断点恢复。</p>
+ * <p>事件：各阶段前后发布 {@code agent.start} / {@code agent.result}，
+ * 流程节点发布 {@code pipeline.pause/resume/done/error}（见 {@link EventPublisher}）。</p>
  */
 @Component
 public class PipelineEngine {
 
-    /** 并行阶段：② ③ ④ */
+    /** 并行阶段：② 文献检索 / ③ 知识发现（互不依赖） */
     private static final List<AgentStage> PARALLEL_STAGES = List.of(
-            AgentStage.LITERATURE, AgentStage.KNOWLEDGE, AgentStage.HYPOTHESIS);
+            AgentStage.LITERATURE, AgentStage.KNOWLEDGE);
 
     private final Map<AgentStage, List<PipelineAgent>> agentsByStage;
-    private final ExecutorService parallelPool = Executors.newFixedThreadPool(
-            Math.max(2, PARALLEL_STAGES.size()));
+    private final EventPublisher eventPublisher;
+    private final ExecutorService parallelPool = newDaemonPool(
+            Math.max(2, PARALLEL_STAGES.size()), "pipeline-parallel");
+    private final ExecutorService pipelinePool = newDaemonPool(1, "pipeline-run");
+    private final Map<String, PipelineRuntime> runtimes = new ConcurrentHashMap<>();
 
     /**
-     * 构造注入：Spring 自动收集所有 PipelineAgent 实现并按阶段分组。
+     * 测试/无事件场景构造：事件发布为空实现。
      *
      * @param agents 全部已接入的 Agent（自动注入，无需手工注册）
      */
     public PipelineEngine(List<PipelineAgent> agents) {
-        this.agentsByStage = agents.stream()
-                .collect(Collectors.groupingBy(PipelineAgent::stage));
+        this(agents, new NoopEventPublisher());
     }
 
     /**
-     * 启动管线：输入科研问题，执行完整七阶段，返回携带最终报告的上下文。
+     * 生产构造：Spring 自动收集所有 PipelineAgent 并按阶段分组。
+     *
+     * @param agents         全部已接入的 Agent
+     * @param eventPublisher SSE 事件发布器
+     */
+    public PipelineEngine(List<PipelineAgent> agents, EventPublisher eventPublisher) {
+        this.agentsByStage = agents.stream()
+                .collect(Collectors.groupingBy(PipelineAgent::stage));
+        this.eventPublisher = eventPublisher;
+    }
+
+    /**
+     * 同步执行完整管线（测试/内部调用）：不注册人在回路暂停，自动放行。
      *
      * @param question 用户输入的科研问题
-     * @return 管线上下文（含各阶段产物与 finalReport）
+     * @return 携带最终报告的上下文
      */
     public PipelineContext run(String question) {
-        if (question == null || question.isBlank()) {
-            throw new IllegalArgumentException("question must not be blank");
-        }
+        String trimmed = requireQuestion(question);
         PipelineContext ctx = new PipelineContext();
-        ctx.setQuestion(question.trim());
-
-        executeStage(AgentStage.UNDERSTANDING, ctx);
-        executeParallel(PARALLEL_STAGES, ctx);
-        pauseForHuman(ctx);
-        executeStage(AgentStage.EVALUATION, ctx);
-        executeStage(AgentStage.EXPERIMENT, ctx);
-        executeStage(AgentStage.DEBATE, ctx);
-
-        ctx.setFinalReport(ResearchPlanAssembler.assemble(ctx));
+        ctx.setQuestion(trimmed);
+        executePipeline(new PipelineRuntime(null, ctx, false));
         return ctx;
     }
 
     /**
-     * 人在回路恢复点：人类审阅修改后调用，从暂停点继续。
-     * TODO（张睿 + 吴浩瑜前端）：对接前端介入按钮与 State 持久化。
+     * 异步启动管线：立即返回 runId，后台执行；在人在回路暂停点等待
+     * {@link #resume(String, PipelineModels.HumanFeedback)}。
+     *
+     * @param question 用户输入的科研问题
+     * @return runId（用于 stream / resume / state）
      */
-    public void resume(PipelineContext ctx) {
-        if (ctx == null) {
-            throw new IllegalArgumentException("ctx must not be null");
-        }
-        // 当前实现为同步执行：run 内暂停点默认放行；
-        // 接入前端后，此方法用于解除阻塞并继续后续阶段。
+    public String start(String question) {
+        String trimmed = requireQuestion(question);
+        PipelineContext ctx = new PipelineContext();
+        ctx.setQuestion(trimmed);
+        String runId = UUID.randomUUID().toString();
+        PipelineRuntime runtime = new PipelineRuntime(runId, ctx, true);
+        runtimes.put(runId, runtime);
+        runtime.future = CompletableFuture.runAsync(
+                () -> executePipeline(runtime), pipelinePool);
+        return runId;
     }
 
-    /** 串行执行单个阶段（可含多个同阶段 Agent） */
-    private void executeStage(AgentStage stage, PipelineContext ctx) {
+    /**
+     * 人在回路恢复：提交人类审阅意见/修改后的候选假设，释放暂停点。
+     *
+     * @param runId    管线标识
+     * @param feedback 人类审阅意见（可为空确认）
+     */
+    public void resume(String runId, PipelineModels.HumanFeedback feedback) {
+        PipelineRuntime runtime = requireRuntime(runId);
+        runtime.ctx.setHumanFeedback(feedback);
+        eventPublisher.publish(runId, "pipeline.resume",
+                Map.of("runId", runId, "comment", feedback == null ? null : feedback.reviewComment()));
+        runtime.humanLatch.countDown();
+    }
+
+    /** 查询 runId 当前管线状态（各阶段产物，未完成时为 null 字段） */
+    public PipelineContext state(String runId) {
+        return requireRuntime(runId).ctx;
+    }
+
+    /** 获取 runId 的完成信号（供调用方等待管线结束） */
+    public CompletableFuture<Void> completion(String runId) {
+        return requireRuntime(runId).future;
+    }
+
+    /** 注册 runId 的 SSE 订阅（GET /pipeline/{runId}/stream） */
+    public void registerStream(String runId, org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter) {
+        if (eventPublisher instanceof SseEventPublisher ssePublisher) {
+            ssePublisher.register(runId, emitter);
+        }
+    }
+
+    // ==================== 编排核心 ====================
+
+    private void executePipeline(PipelineRuntime runtime) {
+        PipelineContext ctx = runtime.ctx;
+        // 同步模式（run()）runId 为空，事件负载统一用 "sync" 兜底（Map.of 不允许 null）
+        String runId = runtime.runId == null ? "sync" : runtime.runId;
+        try {
+            executeStage(AgentStage.UNDERSTANDING, ctx, runId);
+            executeParallel(PARALLEL_STAGES, ctx, runId);
+            executeStage(AgentStage.HYPOTHESIS, ctx, runId);
+            pauseForHuman(runtime, runId);
+            executeStage(AgentStage.EVALUATION, ctx, runId);
+            executeStage(AgentStage.EXPERIMENT, ctx, runId);
+            executeStage(AgentStage.DEBATE, ctx, runId);
+
+            ctx.setFinalReport(ResearchPlanAssembler.assemble(ctx));
+            eventPublisher.publish(runId, "pipeline.done",
+                    Map.of("runId", runId, "report", ctx.getFinalReport()));
+        } catch (Exception exception) {
+            eventPublisher.publish(runId, "pipeline.error",
+                    Map.of("runId", runId, "message", String.valueOf(exception.getMessage())));
+            throw exception;
+        } finally {
+            eventPublisher.complete(runId);
+        }
+    }
+
+    /** 人在回路暂停点：异步模式（awaitHuman=true）阻塞等待人类 resume */
+    private void pauseForHuman(PipelineRuntime runtime, String runId) {
+        if (!runtime.awaitHuman) {
+            return;
+        }
+        eventPublisher.publish(runId, "pipeline.pause",
+                Map.of("runId", runId,
+                        "message", "等待人类审阅候选假设（POST /pipeline/{runId}/resume）"));
+        try {
+            runtime.humanLatch.await();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("管线等待人类介入时被中断", interrupted);
+        }
+    }
+
+    /** 串行执行单个阶段（可含多个同阶段 Agent），逐 Agent 发布事件 */
+    private void executeStage(AgentStage stage, PipelineContext ctx, String runId) {
         List<PipelineAgent> agents = agentsByStage.getOrDefault(stage, List.of());
         for (PipelineAgent agent : agents) {
+            eventPublisher.publish(runId, "agent.start",
+                    Map.of("stage", stage.name(), "agent", agent.getClass().getSimpleName()));
             try {
                 agent.execute(ctx);
             } catch (Exception exception) {
@@ -99,21 +195,91 @@ public class PipelineEngine {
                         "阶段 " + stage + " 执行失败：" + agent.getClass().getSimpleName(),
                         exception);
             }
+            // 阶段产物可能为 null（Agent 未产出），Map.of 不允许 null，故用 LinkedHashMap
+            java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
+            result.put("stage", stage.name());
+            result.put("agent", agent.getClass().getSimpleName());
+            result.put("output", stageOutput(ctx, stage));
+            eventPublisher.publish(runId, "agent.result", result);
         }
     }
 
-    /** 并行执行多个阶段（②③④），全部完成后聚合 */
-    private void executeParallel(List<AgentStage> stages, PipelineContext ctx) {
+    /** 并行执行多个阶段（②③），全部完成后聚合 */
+    private void executeParallel(List<AgentStage> stages, PipelineContext ctx, String runId) {
         List<CompletableFuture<Void>> futures = stages.stream()
                 .map(stage -> CompletableFuture.runAsync(
-                        () -> executeStage(stage, ctx), parallelPool))
+                        () -> executeStage(stage, ctx, runId), parallelPool))
                 .toList();
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        } catch (CompletionException exception) {
+            Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw exception;
+        }
     }
 
-    /** 人在回路暂停点：聚合后暂停等待人类审阅 */
-    private void pauseForHuman(PipelineContext ctx) {
-        // TODO（张睿）：发布 pipeline.pause 事件给前端，等待 resume；
-        // 当前版本默认放行（同步执行），便于先跑通全链路。
+    /** 阶段产物摘要（agent.result 事件负载，未产出为 null） */
+    private Object stageOutput(PipelineContext ctx, AgentStage stage) {
+        return switch (stage) {
+            case UNDERSTANDING -> ctx.getQuestionQuery();
+            case LITERATURE -> ctx.getLiterature();
+            case KNOWLEDGE -> ctx.getKnowledgeDiscovery();
+            case HYPOTHESIS -> ctx.getHypothesis();
+            case EVALUATION -> ctx.getEvaluation();
+            case EXPERIMENT -> ctx.getExperiment();
+            case DEBATE -> ctx.getDebate();
+        };
+    }
+
+    private PipelineRuntime requireRuntime(String runId) {
+        PipelineRuntime runtime = runtimes.get(runId);
+        if (runtime == null) {
+            throw new IllegalArgumentException("未找到管线运行态 runId=" + runId);
+        }
+        return runtime;
+    }
+
+    private static String requireQuestion(String question) {
+        if (question == null || question.isBlank()) {
+            throw new IllegalArgumentException("question must not be blank");
+        }
+        return question.trim();
+    }
+
+    private static ExecutorService newDaemonPool(int size, String name) {
+        ThreadFactory factory = runnable -> {
+            Thread thread = new Thread(runnable, name + "-" + System.nanoTime());
+            thread.setDaemon(true);
+            return thread;
+        };
+        return Executors.newFixedThreadPool(size, factory);
+    }
+
+    /** 单任务运行态：ctx + 暂停闩 + 完成信号 */
+    private static final class PipelineRuntime {
+
+        private final String runId;
+        private final PipelineContext ctx;
+        private final boolean awaitHuman;
+        private final CountDownLatch humanLatch = new CountDownLatch(1);
+        private volatile CompletableFuture<Void> future;
+
+        private PipelineRuntime(String runId, PipelineContext ctx, boolean awaitHuman) {
+            this.runId = runId;
+            this.ctx = ctx;
+            this.awaitHuman = awaitHuman;
+        }
+    }
+
+    /** 空事件发布器（同步模式/测试） */
+    private static final class NoopEventPublisher implements EventPublisher {
+
+        @Override
+        public void publish(String taskId, String eventType, Object data) {
+            // 无订阅方，事件丢弃
+        }
     }
 }
