@@ -1,6 +1,6 @@
-# HypoLab 科研假设智能生成与方法知识库管理系统 V1.0.1
+# HypoLab 科研假设生成 Agent 交互工作台
 
-V1.0.1 是 V1.0 的接口修复版，修复了中文编码损坏导致“生成科学假设”按钮无响应的问题。
+本模块保留 HypoLab 交互页面，负责接收上游提供的结构化证据并调用团队统一后端或通义千问生成有依据、可证伪的科学假设。图片、表格和论文原文的识别解析不属于本模块职责。
 
 ## 已实现功能
 
@@ -46,14 +46,14 @@ QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
 - `503 GENERATOR_NOT_CONFIGURED`：未配置真实生成服务
 - `500 HYPOTHESIS_PERSIST_FAILED`：生成成功但 D1 保存失败，未创建记录
 
-## 本次修复
+## 本次 Agent 化改造
 
-- 修复 `app/api/hypotheses/route.ts` 的中文编码与语法错误
-- 修复方法库接口、数据库 schema 和迁移文件中的中文乱码
-- 增加无效 JSON、空研究问题和数据库不可用时的处理
-- 修复 Windows 下 `npm run dev`、`npm run build` 的启动脚本
-- 移除前端和后端的固定假设模板与模拟成功兜底
+- 移除前端和后端固定假设模板及模拟成功兜底
+- 接收科研问题、ResearchGap、EvidenceItem 列表、数据条件和约束
+- 校验模型输出结构及引用证据 ID，拒绝虚构证据
+- 数据库写入失败时返回明确错误，不生成模拟 ID
 - 补充 Cloudflare Worker/D1 类型声明及 `npm run typecheck`
+- 使用两组不同科研问题验证输出内容和证据引用会随输入变化
 
 ## 本地运行
 
