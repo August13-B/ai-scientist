@@ -1,6 +1,58 @@
+# ===== 内部资料（不进仓库）=====
+.pi/
+# 根目录原始资料（副本在 docs/ 与 .pi/ 下）
+/XH-202619_*.pdf
+/分工细节*.docx
+
+# ===== 环境与密钥 =====
+.env
+*.local
+
+# ===== Java / Maven =====
+backend/target/
+ai-service/target/
+bailian-integration/target/
 target/
-.m2/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+
+# ===== IDE =====
 .idea/
 *.iml
-.env
-logs/
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+
+# ===== Node / 前端 =====
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+data/cache/
+*.egg-info/
+
+# ===== 数据与日志 =====
+*.log
+data/raw/
+data/processed/
+data/datasets/
+*.sql.bak
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db
+
+# ===== 独立百炼集成模块 =====
+bailian-integration/.m2/
