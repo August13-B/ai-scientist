@@ -22,7 +22,8 @@ import static com.aiscientist.ai.agent.KnowledgeDiscoveryModels.PaperEvidence;
 @Service
 public class KnowledgeDiscoveryAgent {
 
-    private static final String MODEL = "qwen-plus";
+    /** 知识发现为重任务：走 Qwen-Max 分级（BailianClient 内部映射到 QWEN_MODEL） */
+    private static final String MODEL = "qwen-max";
 
     private final BailianClient bailianClient;
     private final RagSearchService ragSearchService;
@@ -87,18 +88,13 @@ public class KnowledgeDiscoveryAgent {
         if (!request.evidence().isEmpty()) {
             evidence = request.evidence();
         } else {
-            List<Object> results = ragSearchService.search(
+            // RAG 检索返回已是 PaperEvidence 契约（RagSearchService 保证字段对齐）
+            List<PaperEvidence> results = ragSearchService.search(
                     "papers", request.question(), request.topK());
             if (results == null || results.isEmpty()) {
                 throw new IllegalArgumentException("论文检索未返回可追溯证据");
             }
-            try {
-                evidence = results.stream()
-                        .map(this::toPaperEvidence)
-                        .toList();
-            } catch (IllegalArgumentException exception) {
-                throw new IllegalArgumentException("论文检索返回了无效证据", exception);
-            }
+            evidence = results;
         }
 
         Map<String, PaperEvidence> distinct = new LinkedHashMap<>();
@@ -107,13 +103,6 @@ public class KnowledgeDiscoveryAgent {
             throw new IllegalArgumentException("知识发现至少需要两篇不同来源论文");
         }
         return List.copyOf(distinct.values());
-    }
-
-    private PaperEvidence toPaperEvidence(Object result) {
-        if (result instanceof PaperEvidence paperEvidence) {
-            return paperEvidence;
-        }
-        return objectMapper.convertValue(result, PaperEvidence.class);
     }
 
     private Map<String, Object> payload(
