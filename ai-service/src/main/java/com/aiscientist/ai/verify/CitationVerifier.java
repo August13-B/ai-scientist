@@ -138,12 +138,18 @@ public final class CitationVerifier {
         return na.equals(nb) || na.contains(nb) || nb.contains(na);
     }
 
-    /** 引用里 "|" 前的部分视为标题；纯标识符则返回 null */
+    /** 引用里 "|" 前的部分视为标题；纯标识符（含 doi:/arxiv:/pmid: 前缀）则返回 null */
     static String titleOf(String citation) {
         if (citation == null || citation.isBlank()) {
             return null;
         }
         String first = citation.split("\\|")[0].trim();
+        String lower = first.toLowerCase();
+        // 带前缀的纯标识符，不作为标题
+        if (lower.startsWith("doi:") || lower.startsWith("arxiv:") || lower.startsWith("pmid:")) {
+            return null;
+        }
+        // 纯 DOI / arXiv / PMID，不作为标题
         if (DOI.matcher(first).matches() || ARXIV.matcher(first).matches() || PMID.matcher(first).matches()) {
             return null;
         }
