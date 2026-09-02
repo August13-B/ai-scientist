@@ -42,11 +42,37 @@ public class ExperimentStage implements PipelineAgent {
                 "pipeline-task", "pipeline-run", "best-hypothesis",
                 "Experiment for selected hypothesis", domain, best.summary(), "primary outcome", null);
         GeneratedExperimentContent generated = generator.generate(request, evidence);
+        validateGeneratedContent(generated, best.summary());
         ctx.setExperiment(new PipelineModels.ExperimentResult(
                 generated.baselines(), generated.metrics(), generated.datasets(),
                 String.join("; ", generated.expectedResults())));
     }
 
+    private void validateGeneratedContent(GeneratedExperimentContent generated, String hypothesis) {
+        if (generated == null) {
+            throw new IllegalStateException("Experiment generator returned no content");
+        }
+        if (generated.datasets() == null || generated.datasets().isEmpty()) {
+            throw new IllegalStateException("Experiment datasets must not be empty");
+        }
+        for (String dataset : generated.datasets()) {
+            if (dataset == null || dataset.isBlank()
+                    || !(dataset.contains("https://") || dataset.contains("http://"))) {
+                throw new IllegalStateException(
+                        "Each experiment dataset must include a name and traceable URL: " + dataset);
+            }
+        }
+        if (generated.expectedResults() == null || generated.expectedResults().isEmpty()) {
+            throw new IllegalStateException("Expected results must describe a predicted range or decision criterion");
+        }
+        for (String expected : generated.expectedResults()) {
+            if (expected == null || expected.isBlank()
+                    || expected.trim().equalsIgnoreCase(hypothesis.trim())) {
+                throw new IllegalStateException(
+                        "Expected results must be predictions, not a copy of the hypothesis");
+            }
+        }
+    }
     private PipelineModels.EvaluationResult requireEvaluation(PipelineContext ctx) {
         if (ctx.getEvaluation() == null) {
             throw new IllegalStateException("Experiment stage requires evaluation output");

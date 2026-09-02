@@ -50,6 +50,29 @@ class ExperimentStageTest {
                 .hasMessageContaining("Untraceable");
     }
 
+    @Test
+    void rejectsDatasetWithoutTraceableUrl() {
+        ExperimentPlanGenerator generator = mock(ExperimentPlanGenerator.class);
+        when(generator.generate(any(), any())).thenReturn(new GeneratedExperimentContent(
+                List.of("a"), List.of("m"), List.of("untraceable dataset"), List.of("p"),
+                List.of("predicted range 5%-10%"), List.of("risk")));
+
+        assertThatThrownBy(() -> new ExperimentStage(generator).execute(contextWithEvaluation()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("traceable URL");
+    }
+
+    @Test
+    void rejectsExpectedResultCopiedFromHypothesis() {
+        ExperimentPlanGenerator generator = mock(ExperimentPlanGenerator.class);
+        when(generator.generate(any(), any())).thenReturn(new GeneratedExperimentContent(
+                List.of("a"), List.of("m"), List.of("Dataset (https://example.org/data)"), List.of("p"),
+                List.of("RAG reduces unsupported answers"), List.of("risk")));
+
+        assertThatThrownBy(() -> new ExperimentStage(generator).execute(contextWithEvaluation()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("not a copy");
+    }
     private PipelineContext contextWithEvaluation() {
         PipelineContext context = new PipelineContext();
         context.setQuestionQuery(new PipelineModels.QuestionQuery(
