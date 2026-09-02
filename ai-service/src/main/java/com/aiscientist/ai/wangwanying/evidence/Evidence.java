@@ -52,8 +52,13 @@ public record Evidence(
         }
     }
 
-    public Evidence(String subject, String predicate, String object, String statement, String doi, String pmid, String sourceTitle, int year, List<String> tags) {
-        this("default-task", "default-run", doi == null || doi.isBlank() ? "pmid:" + pmid : "doi:" + doi, EvidenceModality.TEXT, subject, predicate, object, statement, doi, pmid, sourceTitle, year, "", null, "", 1.0, "", tags);
+    public Evidence(
+            String subject, String predicate, String object, String statement,
+            String doi, String pmid, String sourceTitle, int year, List<String> tags) {
+        this("default-task", "default-run",
+                doi == null || doi.isBlank() ? "pmid:" + pmid : "doi:" + doi,
+                EvidenceModality.TEXT, subject, predicate, object, statement,
+                doi, pmid, sourceTitle, year, "", null, "", 1.0, "", tags);
     }
 
     public String id() {

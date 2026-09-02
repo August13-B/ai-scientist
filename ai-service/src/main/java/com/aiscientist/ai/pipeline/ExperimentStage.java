@@ -1,12 +1,24 @@
 package com.aiscientist.ai.pipeline;
 
+import com.aiscientist.ai.wangwanying.evidence.Evidence;
+import com.aiscientist.ai.wangwanying.evidence.EvidenceModality;
+import com.aiscientist.ai.wangwanying.experiment.ExperimentPlanGenerator;
+import com.aiscientist.ai.wangwanying.experiment.ExperimentRequest;
+import com.aiscientist.ai.wangwanying.experiment.GeneratedExperimentContent;
 import org.springframework.stereotype.Component;
 
+import java.util.Comparator;
 import java.util.List;
 
-/** Adapts experiment design output to the shared pipeline contract. */
+/** Connects the real experiment generator to the shared pipeline contract. */
 @Component
 public class ExperimentStage implements PipelineAgent {
+
+    private final ExperimentPlanGenerator generator;
+
+    public ExperimentStage(ExperimentPlanGenerator generator) {
+        this.generator = generator;
+    }
 
     @Override
     public AgentStage stage() {
@@ -15,25 +27,45 @@ public class ExperimentStage implements PipelineAgent {
 
     @Override
     public void execute(PipelineContext ctx) {
-        PipelineModels.EvaluationResult evaluation = ctx.getEvaluation();
-        if (evaluation == null) {
+        PipelineModels.EvaluationResult evaluation = requireEvaluation(ctx);
+        PipelineModels.ScoredHypothesis best = evaluation.rankings().stream()
+                .max(Comparator.comparingDouble(PipelineModels.ScoredHypothesis::overall))
+                .orElseThrow(() -> new IllegalStateException("Experiment stage requires a ranked hypothesis"));
+        List<Evidence> evidence = evaluation.references().stream()
+                .map(this::toEvidence)
+                .toList();
+        if (evidence.isEmpty()) {
+            throw new IllegalStateException("Experiment stage requires verified DOI, PMID, or URL references");
+        }
+        String domain = ctx.getQuestionQuery() == null ? "general science" : ctx.getQuestionQuery().domain();
+        ExperimentRequest request = new ExperimentRequest(
+                "pipeline-task", "pipeline-run", "best-hypothesis",
+                "Experiment for selected hypothesis", domain, best.summary(), "primary outcome", null);
+        GeneratedExperimentContent generated = generator.generate(request, evidence);
+        ctx.setExperiment(new PipelineModels.ExperimentResult(
+                generated.baselines(), generated.metrics(), generated.datasets(),
+                String.join("; ", generated.expectedResults())));
+    }
+
+    private PipelineModels.EvaluationResult requireEvaluation(PipelineContext ctx) {
+        if (ctx.getEvaluation() == null) {
             throw new IllegalStateException("Experiment stage requires evaluation output");
         }
+        return ctx.getEvaluation();
+    }
 
-        List<String> baselines = List.of("standard baseline", "retrieval-augmented baseline");
-        List<String> metrics = evaluation.rankings().stream()
-                .map(ranking -> "overall=" + ranking.overall() + ", feasibility=" + ranking.feasibility())
-                .toList();
-        if (metrics.isEmpty()) {
-            metrics = List.of("overall score");
+    private Evidence toEvidence(String source) {
+        String normalized = source == null ? "" : source.trim();
+        String lower = normalized.toLowerCase();
+        String doi = lower.startsWith("doi:") ? normalized.substring(4) : "";
+        String pmid = lower.startsWith("pmid:") ? normalized.substring(5) : "";
+        String url = lower.startsWith("http://") || lower.startsWith("https://") ? normalized : "";
+        if (doi.isBlank() && pmid.isBlank() && url.isBlank()) {
+            throw new IllegalStateException("Untraceable experiment reference: " + normalized);
         }
-        List<String> datasets = evaluation.references().isEmpty()
-                ? List.of("evaluation dataset to be supplied")
-                : evaluation.references();
-        String expectedResults = evaluation.rankings().isEmpty()
-                ? "Expected results require an evaluated hypothesis."
-                : evaluation.rankings().get(0).summary();
-        ctx.setExperiment(new PipelineModels.ExperimentResult(
-                baselines, metrics, datasets, expectedResults));
+        return new Evidence(
+                "pipeline-task", "pipeline-run", normalized, EvidenceModality.TEXT,
+                "verified source", "supports", "selected hypothesis", normalized,
+                doi, pmid, normalized, 2026, "", null, url, 1.0, "", List.of("pipeline"));
     }
 }

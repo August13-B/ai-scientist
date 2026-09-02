@@ -1,31 +1,63 @@
 package com.aiscientist.ai.pipeline;
 
+import com.aiscientist.ai.wangwanying.experiment.ExperimentPlanGenerator;
+import com.aiscientist.ai.wangwanying.experiment.GeneratedExperimentContent;
 import org.junit.jupiter.api.Test;
-import dev.langchain4j.model.chat.ChatModel;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.aiscientist.ai.wangwanying.experiment.BailianExperimentPlanGenerator;
-import com.aiscientist.ai.wangwanying.experiment.ExperimentRequest;
-import com.aiscientist.ai.wangwanying.evidence.Evidence;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class ExperimentStageTest {
+
     @Test
-    void mapsEvaluationToSharedExperimentContract() {
+    void invokesRealGeneratorContractAndMapsItsOutput() {
+        ExperimentPlanGenerator generator = mock(ExperimentPlanGenerator.class);
+        when(generator.generate(any(), any())).thenReturn(new GeneratedExperimentContent(
+                List.of("baseline-a", "baseline-b", "baseline-c"),
+                List.of("accuracy", "confidence interval", "effect size", "stability", "cost"),
+                List.of("dataset-name (https://example.org/dataset)"),
+                List.of("prepare", "split", "train", "evaluate", "report"),
+                List.of("error rate is expected to decrease", "confidence interval excludes zero", "cost remains bounded"),
+                List.of("data leakage", "small sample", "domain shift")));
+        PipelineContext context = contextWithEvaluation();
+
+        new ExperimentStage(generator).execute(context);
+
+        verify(generator).generate(any(), any());
+        assertThat(context.getExperiment().baselines()).containsExactly(
+                "baseline-a", "baseline-b", "baseline-c");
+        assertThat(context.getExperiment().datasets())
+                .containsExactly("dataset-name (https://example.org/dataset)");
+        assertThat(context.getExperiment().expectedResults())
+                .contains("error rate is expected to decrease");
+    }
+
+    @Test
+    void rejectsUntraceableReferencesBeforeCallingGenerator() {
+        ExperimentPlanGenerator generator = mock(ExperimentPlanGenerator.class);
+        PipelineContext context = contextWithEvaluation();
+        context.setEvaluation(new PipelineModels.EvaluationResult(
+                context.getEvaluation().rankings(), List.of(), List.of("evidence-1")));
+
+        assertThatThrownBy(() -> new ExperimentStage(generator).execute(context))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Untraceable");
+    }
+
+    private PipelineContext contextWithEvaluation() {
         PipelineContext context = new PipelineContext();
+        context.setQuestionQuery(new PipelineModels.QuestionQuery(
+                "question", "computer science", List.of(), List.of(), List.of(), List.of()));
         PipelineModels.ScoredHypothesis scored = new PipelineModels.ScoredHypothesis(
                 "RAG reduces unsupported answers", 0.8, 0.9, 0.95, 0.7, 0.85);
         context.setEvaluation(new PipelineModels.EvaluationResult(
-                List.of(scored), List.of(), List.of("evidence-1")));
-        new ExperimentStage().execute(context);
-        assertThat(context.getExperiment()).isNotNull();
-        assertThat(context.getExperiment().baselines()).hasSize(2);
-        assertThat(context.getExperiment().metrics()).isNotEmpty();
-        assertThat(context.getExperiment().datasets()).containsExactly("evidence-1");
+                List.of(scored), List.of(), List.of("doi:10.1000/test")));
+        return context;
     }
 }
