@@ -150,18 +150,16 @@ public final class CitationVerifier {
         return first.isEmpty() ? null : first;
     }
 
-    static String extractDoi(String raw) {
+    public static String extractDoi(String raw) {
         Matcher m = DOI.matcher(raw == null ? "" : raw);
         return m.find() ? m.group() : null;
     }
 
-    static String extractArxiv(String raw) {
+    public static String extractArxiv(String raw) {
         Matcher m = ARXIV.matcher(raw == null ? "" : raw);
         return m.find() ? m.group(1) : null;
     }
 
-    static String extractPmid(String raw) {
+    public static String extractPmid(String raw) {
         Matcher m = PMID.matcher(raw == null ? "" : raw);
-        return m.find() ? m.group(1) : null;
-    }
-}
+        return m.find() ? m.grou
