@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import type { EvidenceItem, ValidationPlan } from "../lib/hypothesis-contract";
 
 type Method = {
   id: number;
@@ -17,11 +18,15 @@ type Hypothesis = {
   title: string;
   statement: string;
   rationale: string;
+  citedEvidenceIds: string[];
+  validationPlan: ValidationPlan;
   technicalDetails: string;
   methods: string;
   datasets: string;
   metrics: string;
   novelty: number;
+  feasibility: number;
+  confidence: number;
   consistency: number;
   testability: number;
   status: string;
@@ -44,15 +49,20 @@ export function ResearchWorkbench() {
   const [showMethodForm, setShowMethodForm] = useState(false);
   const [methodForm, setMethodForm] = useState(emptyMethod);
   const [problem, setProblem] = useState("如何利用多模态行为数据更早识别大学生心理压力风险？");
-  const [evidence, setEvidence] = useState("已有研究表明睡眠节律、社交活动下降和语言情绪变化与压力水平有关，但单一模态模型的跨人群泛化能力有限。");
+  const [researchGap, setResearchGap] = useState("现有研究多为横截面分析，缺少个体纵向基线和跨周期验证。");
+  const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>([
+    { id: "E001", type: "paper", title: "睡眠规律性研究", content: "睡眠时间波动与压力评分呈正相关。", source: "上游论文解析模块", reliability: 0.87 },
+    { id: "E002", type: "dataset", title: "校园行为数据集", content: "包含约2000名学生连续12周的睡眠、运动和压力评分。", source: "上游数据模块", reliability: 0.92 },
+  ]);
   const [dataCondition, setDataCondition] = useState("可获得匿名化的睡眠、运动、校园活动与周记文本数据，样本约 2,000 人，持续 12 周。");
+  const [constraints, setConstraints] = useState("必须可证伪\n不得虚构证据\n只能引用输入中的证据ID");
   const [count, setCount] = useState(3);
   const [generating, setGenerating] = useState(false);
   const [toast, setToast] = useState("");
 
   useEffect(() => {
-    fetch("/api/methods").then((r) => r.ok ? r.json() : null).then((d) => d?.methods?.length && setMethods(d.methods)).catch(() => undefined);
-    fetch("/api/hypotheses").then((r) => r.ok ? r.json() : null).then((d) => d?.hypotheses && setHypotheses(d.hypotheses)).catch(() => undefined);
+    fetch("/api/methods").then((r) => r.ok ? r.json() as Promise<{methods:Method[]}> : null).then((d) => d?.methods?.length && setMethods(d.methods)).catch(() => undefined);
+    fetch("/api/hypotheses").then((r) => r.ok ? r.json() as Promise<{hypotheses:Hypothesis[]}> : null).then((d) => d?.hypotheses && setHypotheses(d.hypotheses)).catch(() => undefined);
   }, []);
 
   const filteredMethods = useMemo(() => methods.filter((item) =>
@@ -69,7 +79,7 @@ export function ResearchWorkbench() {
     const fallback = { ...methodForm, id: Date.now() };
     try {
       const response = await fetch("/api/methods", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(methodForm) });
-      const data = await response.json();
+      const data = await response.json() as { method?: Method };
       setMethods((current) => [data.method ?? fallback, ...current]);
     } catch { setMethods((current) => [fallback, ...current]); }
     setMethodForm(emptyMethod);
@@ -89,23 +99,22 @@ export function ResearchWorkbench() {
     try {
       const response = await fetch("/api/hypotheses", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ problem, evidence, dataCondition, count, methodIds: methods.slice(0, 5).map((m) => m.id) }),
+        body: JSON.stringify({ researchQuestion: problem, researchGap, evidenceItems, dataConditions: dataCondition, constraints: constraints.split("\n").map((x) => x.trim()).filter(Boolean), candidateCount: count }),
       });
-      if (!response.ok) throw new Error("generate failed");
-      const data = await response.json();
-      setHypotheses((current) => [...data.hypotheses, ...current]);
+      const data = await response.json() as { hypotheses?: Hypothesis[]; message?: string };
+      if (!response.ok) throw new Error(data.message || "生成失败");
+      if (!data.hypotheses?.length) throw new Error("生成服务没有返回候选假设");
+      const generated = data.hypotheses;
+      setHypotheses((current) => [...generated, ...current]);
       setActive("假设记录");
       notify(`已生成 ${data.hypotheses.length} 个候选假设`);
-    } catch {
-      const demo = buildDemoHypotheses(problem, dataCondition, methods, count);
-      setHypotheses((current) => [...demo, ...current]);
-      setActive("假设记录");
-      notify("已使用本地推理模板生成候选假设");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "生成失败，请稍后重试");
     } finally { setGenerating(false); }
   }
 
   function exportReport(item: Hypothesis) {
-    const body = `科学假设研究方案\n\n研究假设\n${item.statement}\n\n推理依据（Rationale）\n${item.rationale}\n\n技术细节（Technical Details）\n${item.technicalDetails}\n\n方法（Methods）\n${item.methods}\n\n数据条件\n${item.datasets}\n\n评价指标\n${item.metrics}\n\n质量评分\n创新性 ${item.novelty} / 逻辑自洽性 ${item.consistency} / 可验证性 ${item.testability}\n`;
+    const body = `科学假设研究方案\n\n研究假设\n${item.statement}\n\n生成依据\n${item.rationale}\n\n引用证据\n${item.citedEvidenceIds.join("、")}\n\n验证方法\n${item.validationPlan.method}\n\n变量\n${item.validationPlan.variables.join("、")}\n\n数据集\n${item.validationPlan.dataset}\n\n指标\n${item.validationPlan.metrics.join("、")}\n\n证伪条件\n${item.validationPlan.falsificationCriteria}\n\n质量评分\n创新性 ${item.novelty} / 可行性 ${item.feasibility} / 置信度 ${item.confidence}\n`;
     const blob = new Blob([body], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `${item.title}.txt`; a.click(); URL.revokeObjectURL(url);
@@ -131,8 +140,10 @@ export function ResearchWorkbench() {
           <section className="panel composer">
             <div className="section-heading"><div><span className="step">01</span><h2>描述研究上下文</h2></div><span className="status">草稿自动保存</span></div>
             <label>研究问题<textarea value={problem} onChange={(e) => setProblem(e.target.value)} rows={3} /></label>
-            <label>已知事实与研究空白<textarea value={evidence} onChange={(e) => setEvidence(e.target.value)} rows={4} /></label>
+            <label>ResearchGap（研究空白）<textarea value={researchGap} onChange={(e) => setResearchGap(e.target.value)} rows={3} /></label>
+            <div className="evidence-editor"><b>结构化证据 EvidenceItem</b>{evidenceItems.map((item, index) => <div className="evidence-input" key={item.id}><span>{item.id}</span><textarea aria-label={`证据${item.id}`} value={item.content} onChange={(event) => setEvidenceItems((current) => current.map((entry, i) => i === index ? {...entry, content:event.target.value} : entry))} rows={2}/><button aria-label={`删除证据${item.id}`} onClick={() => setEvidenceItems((current) => current.filter((_, i) => i !== index))}>×</button></div>)}<button className="text-button" onClick={() => setEvidenceItems((current) => [...current, { id:`E${String(current.length + 1).padStart(3,"0")}`, type:"observation", content:"" }])}>＋ 添加证据</button></div>
             <label>可用数据与实验条件<textarea value={dataCondition} onChange={(e) => setDataCondition(e.target.value)} rows={3} /></label>
+            <label>生成约束（每行一条）<textarea value={constraints} onChange={(e) => setConstraints(e.target.value)} rows={3} /></label>
             <div className="generate-row"><div><span>候选数量</span><div className="count-picker">{[3,4,5].map((n) => <button key={n} onClick={() => setCount(n)} className={count === n ? "selected" : ""}>{n}</button>)}</div></div><button className="primary" onClick={generate} disabled={generating}>{generating ? "正在构建推理链…" : "生成科学假设 →"}</button></div>
           </section>
           <aside className="right-rail">
@@ -154,8 +165,8 @@ export function ResearchWorkbench() {
           <div className="history-intro"><div><span className="eyebrow">STRUCTURED OUTPUT</span><h2>候选科学假设</h2><p>每条结果都包含推理链、验证方法与三维质量评分。</p></div><button className="primary compact" onClick={() => setActive("工作台")}>＋ 新建任务</button></div>
           {hypotheses.length === 0 ? <div className="empty"><span>◇</span><h3>还没有生成记录</h3><p>从工作台输入研究问题，生成第一组可验证假设。</p><button className="primary compact" onClick={() => setActive("工作台")}>开始生成</button></div> : hypotheses.map((h, index) => <article className="hypothesis-card" key={`${h.id}-${index}`}>
             <div className="card-index">H{String(index + 1).padStart(2,"0")}</div><div className="card-main"><div className="card-top"><div><span className="tag">{h.status}</span><h3>{h.title}</h3></div><button className="export" onClick={() => exportReport(h)}>导出报告</button></div><p className="statement">{h.statement}</p>
-              <details open><summary>推理依据 · Rationale</summary><p>{h.rationale}</p></details><div className="two-col"><div><b>技术细节</b><p>{h.technicalDetails}</p></div><div><b>实验方法</b><p>{h.methods}</p></div></div>
-              <div className="score-row">{[["创新性",h.novelty],["自洽性",h.consistency],["可验证性",h.testability]].map(([label,score]) => <div key={String(label)}><span>{label}<b>{score}</b></span><i><em style={{width:`${score}%`}} /></i></div>)}</div>
+              <details open><summary>生成依据 · Rationale</summary><p>{h.rationale}</p><div className="evidence-tags">引用证据：{h.citedEvidenceIds.map((id) => <span key={id}>{id}</span>)}</div></details><div className="two-col"><div><b>验证方法</b><p>{h.validationPlan.method}</p><p>变量：{h.validationPlan.variables.join("、")}</p></div><div><b>验证方案</b><p>{h.validationPlan.dataset}</p><p>指标：{h.validationPlan.metrics.join("、")}</p><p>证伪条件：{h.validationPlan.falsificationCriteria}</p></div></div>
+              <div className="score-row">{[["创新性",h.novelty],["可行性",h.feasibility],["置信度",h.confidence]].map(([label,score]) => <div key={String(label)}><span>{label}<b>{score}</b></span><i><em style={{width:`${score}%`}} /></i></div>)}</div>
             </div></article>)}
         </section>}
       </section>
@@ -164,15 +175,4 @@ export function ResearchWorkbench() {
       {toast && <div className="toast">✓ {toast}</div>}
     </main>
   );
-}
-
-function buildDemoHypotheses(problem: string, data: string, methods: Method[], count: number): Hypothesis[] {
-  const templates = [
-    ["跨模态一致性可作为早期风险信号", "当多个弱行为信号在时间维度上同步偏移时，其联合表示比任一单模态指标更早、更稳定地反映潜在风险。"],
-    ["个体基线校准能提升跨人群泛化能力", "以个体历史基线进行归一化，可减少人口属性与日常习惯差异造成的分布偏移，从而提升模型泛化表现。"],
-    ["时间窗口自适应机制可改善预警提前量", "动态选择不同长度的观测窗口，能够同时捕获短期突变和长期趋势，在不显著增加误报率的情况下提前预警。"],
-    ["可解释的中间表征有助于降低误报", "加入与领域知识一致的中间概念约束，可以抑制偶然相关特征，提高预测的稳定性与可解释性。"],
-    ["不确定性估计可提高实际干预安全性", "对预测结果进行不确定性校准，并将高不确定样本转入人工复核，可降低自动化决策风险。"],
-  ];
-  return templates.slice(0, count).map(([title, statement], i) => ({ id: Date.now()+i, title, statement: `${statement} 研究问题：${problem}`, rationale: `基于现有事实与方法库中的${methods[i % methods.length]?.name ?? "对照实验"}，推导变量间的可检验关系，并通过消融实验排除替代解释。`, technicalDetails: `建立多模态特征表征，采用${methods[i % methods.length]?.name ?? "统计检验"}完成建模与稳健性验证；设置独立验证集并报告置信区间。`, methods: methods[i % methods.length]?.steps || "数据预处理、基线建模、对照实验、消融分析与误差分析。", datasets: data, metrics: methods[i % methods.length]?.metrics || "AUC、F1、校准误差", novelty: 78+i*3, consistency: 86-i, testability: 83+i, status: "待验证", createdAt: new Date().toISOString() }));
 }
