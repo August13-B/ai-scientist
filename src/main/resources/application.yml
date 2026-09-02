@@ -1,0 +1,25 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: ai-scientist
+
+dashscope:
+  base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+  api-key: ${DASHSCOPE_API_KEY:}
+  chat-model: ${DASHSCOPE_CHAT_MODEL:qwen-plus}
+  embedding-model: ${DASHSCOPE_EMBEDDING_MODEL:text-embedding-v4}
+
+chroma:
+  enabled: ${CHROMA_ENABLED:false}
+  base-url: ${CHROMA_BASE_URL:http://localhost:8000}
+  tenant: ${CHROMA_TENANT:default_tenant}
+  database: ${CHROMA_DATABASE:default_database}
+  collection: ${CHROMA_COLLECTION:scientific_knowledge}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

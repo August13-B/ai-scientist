@@ -1,0 +1,18 @@
+services:
+  chroma:
+    image: chromadb/chroma:0.5.23
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma-data:/chroma/chroma
+  backend:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      CHROMA_BASE_URL: http://chroma:8000
+    depends_on:
+      - chroma
+volumes:
+  chroma-data:

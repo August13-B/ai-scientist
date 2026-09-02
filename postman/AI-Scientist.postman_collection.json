@@ -1,0 +1,44 @@
+{
+  "info": {
+    "name": "AI Scientist Backend",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [{ "key": "baseUrl", "value": "http://localhost:8080" }],
+  "item": [
+    {
+      "name": "Health",
+      "request": { "method": "GET", "url": "{{baseUrl}}/actuator/health" }
+    },
+    {
+      "name": "Qwen Chat",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"prompt\": \"Propose one testable research hypothesis about hallucination detection.\"\n}" },
+        "url": "{{baseUrl}}/api/llm/chat"
+      }
+    },
+    {
+      "name": "Add Knowledge",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"document\": \"Retrieval augmentation can improve factual grounding when the retrieved source is relevant.\",\n  \"metadata\": {\"source\": \"demo-paper\", \"year\": 2024}\n}" },
+        "url": "{{baseUrl}}/api/vectors/documents"
+      }
+    },
+    {
+      "name": "Search Knowledge",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"query\": \"How can RAG reduce factual errors?\",\n  \"limit\": 3\n}" },
+        "url": "{{baseUrl}}/api/vectors/search"
+      }
+    },
+    {
+      "name": "API Logs",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/llm/logs" }
+    }
+  ]
+}
