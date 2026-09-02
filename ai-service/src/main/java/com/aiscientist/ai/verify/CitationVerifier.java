@@ -162,4 +162,6 @@ public final class CitationVerifier {
 
     public static String extractPmid(String raw) {
         Matcher m = PMID.matcher(raw == null ? "" : raw);
-        return m.find() ? m.grou
+        return m.find() ? m.group(1) : null;
+    }
+}
