@@ -20,13 +20,17 @@
 
 ### 1.2 多智能体服务（ai-service，端口 8081）—— 内部接口
 
-| 方法 | 路径 | 用途 |
-|---|---|---|
-| POST | `/pipeline/run` | 启动七 Agent 管线（业务后端调用） |
-| POST | `/pipeline/{runId}/resume` | 人在回路恢复点：继续执行管线 |
-| GET | `/pipeline/{runId}/stream` | SSE 流：Agent 状态事件（业务后端转发） |
-| POST | `/rag/search` | 四库混合检索接口（供 Agent 内部调用，亦可直接对接） |
-| GET | `/pipeline/{runId}/state` | 查询管线 State |
+> 状态：✅ 已实现（`PipelineController`，ai-service 2026-09-02）
+
+| 方法 | 路径 | 用途 | 状态 |
+|---|---|---|---|
+| POST | `/pipeline/run` | 启动七 Agent 管线（业务后端调用），返回 runId 异步执行 | ✅ |
+| POST | `/pipeline/{runId}/resume` | 人在回路恢复点：提交审阅意见/修改后候选假设，继续执行 | ✅ |
+| GET | `/pipeline/{runId}/stream` | SSE 流：Agent 状态事件（业务后端转发），支持历史重放 | ✅ |
+| POST | `/rag/search` | 四库混合检索接口（papers/methods/datasets/evidence） | ✅ |
+| GET | `/pipeline/{runId}/state` | 查询管线 State（各阶段产物快照） | ✅ |
+
+> backend 转发（`/api/tasks/{id}/stream`、`/api/tasks/{id}/intervene`）由后端组实现。
 
 ### 1.3 前端（frontend，端口 5173）—— 页面路由（骨架）
 
