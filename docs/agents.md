@@ -267,3 +267,17 @@ methods/datasets 时改常量即可，检索/提炼/校验链路不变。
 
 > 2026-09-02：张睿实现。本 Agent 随 PR #21（① 问题理解）之后接入，①② 契约闭环：
 > ① 拆解 subQueries → ② 逐条检索提炼 → ④ 消费 papers 生成假设。
+
+### 7.6 报告生成 Agent（已接入）
+
+报告生成阶段由 `ReportStage implements PipelineAgent` 接入，声明阶段为 `AgentStage.REPORT`（⑧，串行最后）。它读取 ①-⑦ 全部产物，调用 `ReportGenerationAgent` 生成最终 10 字段《科学假设与研究计划》，写入 `ctx.setFinalReport()`。
+
+**与单 Agent 直出的区别**：输入包含各环节的过程性推理——① 子查询/关键概念、② keyFindings/citationChains、③ researchGaps、④ reasoningChain、⑤ 评分/幻觉报告、⑥ 实验方案、⑦ 辩论纪要，据此生成一份**多 Agent 协作链路清晰**的《计划》（rationale 融入 ④ 推理与 ⑦ 辩论共识、results 融入 ⑥+⑦、references 走白名单）。
+
+**红线**：references 仅接受真实引用白名单（⑤ 核验通过的 `evaluation.references()` ∪ ③ 溯源 `knowledgeDiscovery.references()`），生成后逐字段校验，缺失/空时用对应阶段产物兜底；LLM 调用失败时 `ReportStage` 自动回退 `ResearchPlanAssembler`（纯 Java 拼接），保证报告永不空缺、管线不中断。
+
+`PipelineEngine` 在 ⑦ 之后执行 REPORT 阶段；若 REPORT 未接入则引擎兜底 `ResearchPlanAssembler.assemble` 产出报告（保底不缺 10 字段）。
+
+对应测试 `ReportGenerationAgentTest`（5 例：10 字段生成/白名单过滤/缺 references 回退/字段缺失兜底/无效 JSON）与 `ReportStageTest`（2 例：ctx 生成/LLM 失败回退 assembler）。
+
+> 2026-09-03：张睿实现。至此管线为 **八 Agent**（①-⑦ 原七 Agent + ⑧ 报告生成）。

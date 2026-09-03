@@ -145,6 +145,9 @@ public class PipelineContext {
         if (debate != null) {
             done.add(AgentStage.DEBATE);
         }
+        if (finalReport != null) {
+            done.add(AgentStage.REPORT);
+        }
         return List.copyOf(done);
     }
 }

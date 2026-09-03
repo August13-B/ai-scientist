@@ -177,8 +177,11 @@ public class PipelineEngine {
             executeStage(runtime, AgentStage.EVALUATION, runId);
             executeStage(runtime, AgentStage.EXPERIMENT, runId);
             executeStage(runtime, AgentStage.DEBATE, runId);
-
-            ctx.setFinalReport(ResearchPlanAssembler.assemble(ctx));
+            // ⑧ 报告生成：ReportStage 内已回退 assembler，保底产出
+            executeStage(runtime, AgentStage.REPORT, runId);
+            if (ctx.getFinalReport() == null) {
+                ctx.setFinalReport(ResearchPlanAssembler.assemble(ctx));
+            }
             eventPublisher.publish(runId, "pipeline.done",
                     Map.of("runId", runId, "report", ctx.getFinalReport()));
         } catch (Exception exception) {
@@ -277,6 +280,7 @@ public class PipelineEngine {
             case EVALUATION -> ctx.getEvaluation();
             case EXPERIMENT -> ctx.getExperiment();
             case DEBATE -> ctx.getDebate();
+            case REPORT -> ctx.getFinalReport();
         };
     }
 
@@ -309,6 +313,16 @@ public class PipelineEngine {
             case DEBATE -> {
                 putIfPresent(input, "evaluation", ctx.getEvaluation());
                 putIfPresent(input, "experiment", ctx.getExperiment());
+            }
+            case REPORT -> {
+                putIfPresent(input, "question", ctx.getQuestion());
+                putIfPresent(input, "questionQuery", ctx.getQuestionQuery());
+                putIfPresent(input, "literature", ctx.getLiterature());
+                putIfPresent(input, "knowledgeDiscovery", ctx.getKnowledgeDiscovery());
+                putIfPresent(input, "hypothesis", ctx.getHypothesis());
+                putIfPresent(input, "evaluation", ctx.getEvaluation());
+                putIfPresent(input, "experiment", ctx.getExperiment());
+                putIfPresent(input, "debate", ctx.getDebate());
             }
         }
         return input;

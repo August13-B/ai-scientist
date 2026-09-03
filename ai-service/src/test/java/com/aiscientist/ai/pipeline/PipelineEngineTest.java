@@ -38,7 +38,8 @@ class PipelineEngineTest {
                 agent(AgentStage.HYPOTHESIS, ctx -> order.add("hypothesis")),
                 agent(AgentStage.EVALUATION, ctx -> order.add("evaluation")),
                 agent(AgentStage.EXPERIMENT, ctx -> order.add("experiment")),
-                agent(AgentStage.DEBATE, ctx -> order.add("debate"))
+                agent(AgentStage.DEBATE, ctx -> order.add("debate")),
+                agent(AgentStage.REPORT, ctx -> order.add("report"))
         ));
 
         PipelineContext ctx = engine.run("  如何提升水稻病害模型泛化能力？  ");
@@ -49,7 +50,7 @@ class PipelineEngineTest {
         assertNotNull(ctx.getFinalReport());
         // 七阶段全部执行
         for (String name : List.of("understanding", "literature", "knowledge",
-                "hypothesis", "evaluation", "experiment", "debate")) {
+                "hypothesis", "evaluation", "experiment", "debate", "report")) {
             assertTrue(order.contains(name), "缺少阶段执行记录: " + name);
         }
         // ① 必须最先执行
@@ -63,6 +64,8 @@ class PipelineEngineTest {
         assertTrue(hypothesis < evaluation, "④ 应先于 ⑤");
         assertTrue(evaluation < order.indexOf("experiment"));
         assertTrue(order.indexOf("experiment") < order.indexOf("debate"));
+        // ⑧ REPORT 在 ⑦ 之后
+        assertTrue(order.indexOf("debate") < order.indexOf("report"));
     }
 
     @Test
@@ -111,7 +114,7 @@ class PipelineEngineTest {
 
         PipelineContext ctx = engine.run("研究问题");
 
-        assertEquals(List.of(AgentStage.KNOWLEDGE), ctx.completedStages());
+        assertEquals(List.of(AgentStage.KNOWLEDGE, AgentStage.REPORT), ctx.completedStages());
         assertNotNull(ctx.getFinalReport());
         assertFalse(ctx.getFinalReport().references().isEmpty(),
                 "未接入阶段以占位填充，最终报告仍可组装");
