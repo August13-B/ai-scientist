@@ -4,6 +4,7 @@ import com.aiscientist.ai.llm.BailianClient;
 import com.aiscientist.ai.verify.CitationCheck;
 import com.aiscientist.ai.verify.CitationStatus;
 import com.aiscientist.ai.verify.CitationVerifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -49,10 +50,14 @@ public class EvaluationStage implements PipelineAgent {
 
     private final CitationVerifier citationVerifier;
     private final BailianClient bailianClient;
+    /** 调试模式（RAG_MOCK_SAMPLES=true）：放宽打回红线（不因无引用/核验不过中断），仅评分；生产保持严格 */
+    private final boolean mockSamples;
 
-    public EvaluationStage(CitationVerifier citationVerifier, BailianClient bailianClient) {
+    public EvaluationStage(CitationVerifier citationVerifier, BailianClient bailianClient,
+                           @Value("${vector.mock-samples:false}") boolean mockSamples) {
         this.citationVerifier = citationVerifier;
         this.bailianClient = bailianClient;
+        this.mockSamples = mockSamples;
     }
 
     @Override
@@ -115,18 +120,20 @@ public class EvaluationStage implements PipelineAgent {
             double overall = innovation * W_INNOVATION + feasibility * W_FEASIBILITY
                     + citationReliability * W_CITATION + dataAvailability * W_DATA;
 
-            // 打回红线：任一命中即拒绝通过
-            if (citations.isEmpty()) {
-                throw new IllegalStateException("评估未通过：候选假设缺少可核验的真实文献引用");
-            }
-            if (verifiedCount == 0) {
-                throw new IllegalStateException("评估未通过：至少需一条真实引用核验通过");
-            }
-            if (hallucinated) {
-                throw new IllegalStateException("评估未通过：检出虚构/存疑引用，必须打回重做");
-            }
-            if (unverifiableCount > 0) {
-                throw new IllegalStateException("评估未通过：存在 " + unverifiableCount + " 条无法核验的引用，请稍后重试或人工确认");
+            // 打回红线：任一命中即拒绝通过（调试模式放宽：不中断，仅评分）
+            if (!mockSamples) {
+                if (citations.isEmpty()) {
+                    throw new IllegalStateException("评估未通过：候选假设缺少可核验的真实文献引用");
+                }
+                if (verifiedCount == 0) {
+                    throw new IllegalStateException("评估未通过：至少需一条真实引用核验通过");
+                }
+                if (hallucinated) {
+                    throw new IllegalStateException("评估未通过：检出虚构/存疑引用，必须打回重做");
+                }
+                if (unverifiableCount > 0) {
+                    throw new IllegalStateException("评估未通过：存在 " + unverifiableCount + " 条无法核验的引用，请稍后重试或人工确认");
+                }
             }
 
             rankings.add(new PipelineModels.ScoredHypothesis(

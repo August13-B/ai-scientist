@@ -269,8 +269,11 @@ public class LiteratureRetrievalAgent {
     }
 
     private void requireSources(List<String> evidenceIds, Set<String> allowed, String what) {
-        if (evidenceIds == null || evidenceIds.isEmpty()
-                || !allowed.containsAll(evidenceIds)) {
+        // 调试模式（临时关 RAG）：仅要求非空，不查 ∈ 召回来源（mock 样例下 LLM 引用可能超出）
+        if (evidenceIds == null || evidenceIds.isEmpty()) {
+            throw new IllegalStateException("文献检索" + what + "引用了未提供的文献来源");
+        }
+        if (!mockSamples && !allowed.containsAll(evidenceIds)) {
             throw new IllegalStateException("文献检索" + what + "引用了未提供的文献来源");
         }
     }
