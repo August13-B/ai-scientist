@@ -40,7 +40,9 @@ import java.util.Map;
 public class RagSearchService {
 
     private static final String EMBEDDING_MODEL = "text-embedding-v4";
-    private static final String QUERY_PATH = "/api/v1/collections/%s/query";
+    /** Chroma v2 端点：多租户/数据库结构（默认 default_tenant/default_database） */
+    private static final String QUERY_PATH =
+            "/api/v2/tenants/default_tenant/databases/default_database/collections/%s/query";
 
     /** 本地调试样例论文（水稻病害检测方向，DOI 均经 Crossref 实测 HTTP 200） */
     private static final List<PaperEvidence> MOCK_SAMPLES = List.of(

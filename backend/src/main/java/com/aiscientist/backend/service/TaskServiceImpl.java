@@ -63,16 +63,23 @@ public class TaskServiceImpl implements TaskService {
     @Override
     public Map<String, Object> getReport(Long taskId) {
         Map<String, Object> state = getTask(taskId);
-        return Map.of("report", state == null ? null : state.get("finalReport"));
+        // 允许 report 为 null（任务尚未生成报告），避免 Map.of(null) 抛 NPE
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("report", state == null ? null : state.get("finalReport"));
+        return result;
     }
 
     @Override
     public List<Map<String, Object>> listRuns() {
-        return webClient.get()
-                .uri("/pipeline/runs")
-                .retrieve()
-                .bodyToMono((Class<List<Map<String, Object>>>) (Class<?>) List.class)
-                .block();
+        // 统一契约：返回后端创建的任务列表（数字 taskId），而非透传 AI 的字符串 runId
+        return taskToRunId.entrySet().stream()
+                .map(entry -> {
+                    Map<String, Object> item = new java.util.LinkedHashMap<>();
+                    item.put("taskId", entry.getKey());
+                    item.put("runId", entry.getValue());
+                    return item;
+                })
+                .toList();
     }
 
     @Override
