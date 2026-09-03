@@ -23,6 +23,8 @@ import static com.aiscientist.ai.agent.KnowledgeDiscoveryModels.PaperEvidence;
 public class HypothesisGenerationAgent {
     private static final String MODEL = "qwen-max";
     private static final int TOP_K = 5;
+    /** 候选假设上限：超过则截断（保留下限 ≥2） */
+    private static final int MAX_HYPOTHESES = 8;
     private static final String SYSTEM_PROMPT = """
             你是科研假设生成 Agent。根据 Research Gap、已知发现和检索证据，
             生成 3 至 5 个彼此不同、可证伪、可验证的科学假设。
@@ -81,7 +83,11 @@ public class HypothesisGenerationAgent {
         payload.put("allowedEvidenceIds", allowed);
         HypothesisResult result = callModel(payload);
         validate(result, allowed);
-        return result;
+        // 上限 8：LLM 多生成候选假设时截断（保留下限 ≥2 已由 validate 保证），不中断
+        List<Hypothesis> capped = result.hypotheses().size() <= MAX_HYPOTHESES
+                ? result.hypotheses()
+                : List.copyOf(result.hypotheses().subList(0, MAX_HYPOTHESES));
+        return new HypothesisResult(capped);
     }
 
     private List<PaperEvidence> search(String collection, String query) {
@@ -100,9 +106,9 @@ public class HypothesisGenerationAgent {
     }
 
     private void validate(HypothesisResult result, Set<String> allowed) {
-        if (result == null || result.hypotheses().size() < 3
-                || result.hypotheses().size() > 5) {
-            throw new IllegalStateException("假设生成结果必须包含 3 至 5 个候选假设");
+        // 保留下限：至少 2 个候选假设（LLM 偶发多给不中断，上限 8 截断）
+        if (result == null || result.hypotheses().size() < 2) {
+            throw new IllegalStateException("假设生成结果必须包含至少 2 个候选假设");
         }
         for (Hypothesis item : result.hypotheses()) {
             if (item.technicalDetails().isEmpty() || item.methods().isEmpty()

@@ -63,20 +63,59 @@ class HypothesisGenerationAgentTest {
                 List.of(paper("论文", "证据", "10.1000/paper"))));
     }
 
+    @Test
+    void allowsMoreThanFiveHypothesesWithCap() {
+        // 旧的 3-5 恰好约束：LLM 给 6 个会报错；现在下限 ≥2、上限 8 截断，6 个应放行
+        BailianClient bailian = mock(BailianClient.class);
+        RagSearchService rag = mock(RagSearchService.class);
+        when(rag.search(anyString(), anyString(), anyInt())).thenReturn(List.of());
+        when(rag.search(org.mockito.ArgumentMatchers.eq("methods"), anyString(),
+                org.mockito.ArgumentMatchers.eq(5))).thenReturn(List.of(paper("m", "m", "10.1000/method")));
+        when(rag.search(org.mockito.ArgumentMatchers.eq("evidence"), anyString(),
+                org.mockito.ArgumentMatchers.eq(5))).thenReturn(List.of(paper("e", "e", "10.1000/evidence")));
+        when(bailian.chat(anyString(), anyString(), anyString())).thenReturn(validJson(6));
+        HypothesisGenerationAgent agent = new HypothesisGenerationAgent(
+                bailian, rag, new ObjectMapper(), false);
+
+        HypothesisResult result = agent.generate("问题", "领域", discovery(), List.of());
+
+        assertEquals(6, result.hypotheses().size(), "6 个假设应放行（旧约束 >5 报错）");
+    }
+
+    @Test
+    void truncatesHypothesesBeyondCap() {
+        BailianClient bailian = mock(BailianClient.class);
+        RagSearchService rag = mock(RagSearchService.class);
+        when(rag.search(anyString(), anyString(), anyInt())).thenReturn(List.of());
+        when(rag.search(org.mockito.ArgumentMatchers.eq("methods"), anyString(),
+                org.mockito.ArgumentMatchers.eq(5))).thenReturn(List.of(paper("m", "m", "10.1000/method")));
+        when(rag.search(org.mockito.ArgumentMatchers.eq("evidence"), anyString(),
+                org.mockito.ArgumentMatchers.eq(5))).thenReturn(List.of(paper("e", "e", "10.1000/evidence")));
+        when(bailian.chat(anyString(), anyString(), anyString())).thenReturn(validJson(10));
+        HypothesisGenerationAgent agent = new HypothesisGenerationAgent(
+                bailian, rag, new ObjectMapper(), false);
+
+        HypothesisResult result = agent.generate("问题", "领域", discovery(), List.of());
+
+        assertEquals(8, result.hypotheses().size(), "超过上限 8 应截断");
+    }
+
     private static String validJson() {
-        return """
-                {"hypotheses":[
-                  {"summary":"假设一","rationale":"依据一",
-                   "technicalDetails":["纵向建模"],"methods":["混合效应模型"],
-                   "reasoningChain":["证据到机制"],"evidenceIds":["doi:10.1000/paper"]},
-                  {"summary":"假设二","rationale":"依据二",
-                   "technicalDetails":["时序分析"],"methods":["交叉验证"],
-                   "reasoningChain":["差异到预测"],"evidenceIds":["doi:10.1000/evidence"]},
-                  {"summary":"假设三","rationale":"依据三",
-                   "technicalDetails":["稳健估计"],"methods":["敏感性分析"],
-                   "reasoningChain":["限制到改进"],"evidenceIds":["doi:10.1000/method"]}
-                ]}
-                """;
+        return validJson(3);
+    }
+
+    /** 生成指定数量的候选假设（重复假设一，仅用于测试上限截断/放行） */
+    private static String validJson(int count) {
+        StringBuilder hypotheses = new StringBuilder();
+        for (int i = 1; i <= count; i++) {
+            if (i > 1) {
+                hypotheses.append(",");
+            }
+            hypotheses.append("{\"summary\":\"假设" + i + "\",\"rationale\":\"依据\","
+                    + "\"technicalDetails\":[\"纵向建模\"],\"methods\":[\"混合效应模型\"],"
+                    + "\"reasoningChain\":[\"证据到机制\"],\"evidenceIds\":[\"doi:10.1000/paper\"]}");
+        }
+        return "{\"hypotheses\":[" + hypotheses + "]}";
     }
 
     private static DiscoveryResult discovery() {
