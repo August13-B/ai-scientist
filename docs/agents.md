@@ -234,3 +234,36 @@ domain 默认值、空条件容缺、结构打回（缺子查询/空概念）、
 trim。
 
 > 2026-09-02：张睿实现。本 Agent 校验不依赖 LLM 之外的引用，无虚构风险面。
+
+### 7.5 文献检索 Agent（已接入）
+
+文献检索阶段由 `LiteratureRetrievalStage implements PipelineAgent` 接入统一流水线，
+声明阶段为 `AgentStage.LITERATURE`（与 ③ 知识发现在并行组，互不依赖）。它读取
+① 的 `ctx.getQuestionQuery()`（subQueries 为空时退化为按原始问题检索），检索并提炼后
+写入 `ctx.setLiterature()`（`LiteratureResult`）。
+
+`LiteratureRetrievalAgent` 流程为「**RAG 检索增强 → LLM 提炼**」：
+
+1. **检索**：对每条 subQuery 在论文库（papers）+ 证据库（evidence）各检索 topK=5
+   （复用 `RagSearchService`，返回已对齐 `PaperEvidence` 契约）；按 `sourceId` 去重聚合，
+   少于 2 篇不同来源直接判失败，超过 15 篇按首现序裁剪（保留子查询优先级）。
+2. **提炼（动态路由）**：召回 ≤8 篇走单次批量（1 次 LLM 输出 keyFindings +
+   citationChains）；>8 篇走两阶段——分组（≤5 篇/组）逐篇提炼 keyFindings →
+   跨篇生成 citationChains，控制单次输入 token。
+3. **白名单校验**：每条 `KeyFinding(finding, evidenceIds)` / `CitationChain(chain,
+   evidenceIds)` 的 evidenceIds 必须 ∈ 召回 `sourceId`；keyFindings 须覆盖每一篇召回
+   文献（防漏篇与虚构）。输出经规范化重建触发 compact 构造器。
+
+`keyFindings` = 关键发现（绑定召回来源）；`citationChains` = 召回文献间**逻辑关联说明**
+（如方法传承/理论支撑/结论互补冲突，绑定召回来源），非字面引用关系（向量库不存引用图）。
+
+RAG 接口预留：检索唯一入口为 `RagSearchService.search(knowledgeBase, query, topK)`，
+知识库范围常量 `KNOWLEDGE_BASES = {papers, evidence}`（② 分工），需按域扩展
+methods/datasets 时改常量即可，检索/提炼/校验链路不变。
+
+下游消费：④ 假设生成读 `papers` 作为直接文献证据；⑤ 评估可据 papers 做本地反向比对。
+对应测试 `LiteratureRetrievalAgentTest`（9 例：去重聚合/兜底检索/两阶段路由/裁剪/
+白名单/覆盖性/无效 JSON）与 `LiteratureRetrievalStageTest`（2 例：ctx 映射/① 缺失兜底）。
+
+> 2026-09-02：张睿实现。本 Agent 随 PR #21（① 问题理解）之后接入，①② 契约闭环：
+> ① 拆解 subQueries → ② 逐条检索提炼 → ④ 消费 papers 生成假设。
