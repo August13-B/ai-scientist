@@ -34,8 +34,8 @@
 | 向量数据库 | Milvus（生产）/ Chroma（开发） | `VECTOR_DB` 环境变量切换；Python SDK 已接入灌库脚本 |
 | 文档解析 | pdfplumber + Grobid | 学术 PDF 结构化：提取标题、摘要、章节、参考文献 |
 | 向量化模型 | **DashScope Embedding API**（text-embedding-v3） | 已定稿：灌库脚本通过百炼在线向量化，维度 1024（可配） |
-| 分块策略 | RecursiveCharacterTextSplitter 风格 | 语义保持分块，`chunk_size=512, overlap=64`（脚本参数可覆盖） |
-| 检索策略 | 混合检索：向量相似度 + BM25 | 兼顾语义匹配与精确术语匹配（当前实现为向量检索；BM25 混合检索待补） |
+| 分块策略 | 语义优先递归切分 | 优先段落、换行、句末、空格边界；`chunk_size=512, overlap=64`（脚本参数可覆盖） |
+| 检索策略 | 混合检索：向量相似度 + BM25 | 兼顾语义匹配与精确术语命中（当前实现为向量检索；BM25 混合检索待补） |
 
 ## 3. 四库构建流程（骨架）
 
@@ -79,8 +79,10 @@
 ## 5. 向量化与分块约定
 
 - 向量化：百炼 DashScope Embedding API（`EMBEDDING_MODEL=text-embedding-v3`，维度 1024）
-- 分块：`chunk_size=512, overlap=64`（灌库脚本 `--chunk-size/--chunk-overlap` 可覆盖）
-- 中文场景建议保留原始段落标题作为分块边界
+- 分块：`chunk_size=512, overlap=64`（灌库脚本 `--chunk-size/--chunk-overlap` 可覆盖）。切分器依次寻找空行段落、换行、中文/英文句末、空格边界，只有单个语义单元超长时才按字符截断。
+- 每个分块统一输出 `id`、`text`、`metadata`；其中 `metadata` 必含 `source_id`、`chunk_index`、`chunk_total`、`chunk_start`、`chunk_end`，并保留各库专有字段。
+- `id` 由 collection、`source_id`、分块序号和文本内容计算，重灌同一份数据时保持稳定；空值元数据会在写入前移除，复杂字段序列化为 JSON 字符串。
+- 中文场景保留原始段落标题作为分块边界，避免从段落中间无意义截断。
 
 ## 6. 灌库数据契约（JSONL，马梓涵产出格式）
 

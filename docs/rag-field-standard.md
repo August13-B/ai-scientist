@@ -138,8 +138,8 @@
 | `evidence` | `title = f"{subject} {predicate} {object}"` | `"睡眠波动 正相关于 压力评分"` |
 
 落地位置：各 `ingest_*.py` 的 `parse_record()` 构造 metadata 处补一行即可（预计每库 1 行）。
-**待办状态**：⚠️ 当前 `methods`/`datasets`/`evidence` 尚未补（关联 PR #15 正在重构灌库脚本，
-由数据侧按本表补齐后同步删除本条待办）。
+**落地状态**：✅ 已随 PR #15 落地（methods.title=method_name、datasets.title=name、
+evidence.title="subject predicate object"），并已加入 `data/tests/test_chunking.py` 的 title 非空断言。
 
 ---
 
@@ -202,4 +202,4 @@ exit code：0 = 全部通过；1 = 存在错误（逐条打印行号与原因）
 | 日期 | 内容 | 关联 |
 |---|---|---|
 | 2026-09-03 | v1.0 定稿：统一四库 JSONL 输入 / payload / metadata / title 等价 / source_id 契约 | 依据 PR #15（统一分块与灌库契约）、PR #17（假设生成 Agent 审核发现 title 缺失）、docs/rag.md 第 6/7 节现有契约归纳 |
-| 待办 | `ingest_methods.py` / `ingest_datasets.py` / `ingest_evidence.py` 补 §5 `title`；rag.md 第 7 节措辞与本文档对齐 | 合并 PR #15 后由数据侧完成 |
+| 2026-09-03 | §5 title 等价字段已由 PR #15 落地（三库 metadata 补 title + 测试断言） | 关联 PR #15

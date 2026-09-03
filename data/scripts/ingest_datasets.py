@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rag_base import BaseIngester, main  # noqa: E402
+from rag_common import normalize_source  # noqa: E402
 
 
 class DatasetsIngester(BaseIngester):
@@ -38,6 +39,7 @@ class DatasetsIngester(BaseIngester):
 
         metadata = {
             "source_id": f"url:{url.strip()}",
+            "title": name,       # 检索侧 PaperEvidence 需要（docs/rag-field-standard.md §5）
             "name": name,
             "features": features,
             "samples": samples,
@@ -48,8 +50,7 @@ class DatasetsIngester(BaseIngester):
             f"数据集：{name}\n特征维度：{features}\n样本量：{samples}\n"
             f"标注方式：{annotation}\n来源：{url}"
         )
-        chunks = self.split_text(text, self.CHUNK_SIZE, self.CHUNK_OVERLAP)
-        return [{"text": c, "metadata": dict(metadata)} for c in chunks]
+        return self.create_chunk_payloads(text, metadata)
 
 
 if __name__ == "__main__":

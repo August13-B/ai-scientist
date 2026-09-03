@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rag_base import BaseIngester, main  # noqa: E402
+from rag_common import normalize_source  # noqa: E402
 
 
 class EvidenceIngester(BaseIngester):
@@ -37,6 +38,7 @@ class EvidenceIngester(BaseIngester):
         )
         metadata = {
             "source_id": source_id,
+            "title": f"{subject} {predicate} {obj}".strip(),  # 检索侧 PaperEvidence 需要（docs/rag-field-standard.md §5）
             "subject": subject,
             "predicate": predicate,
             "object": obj,
@@ -44,15 +46,7 @@ class EvidenceIngester(BaseIngester):
 
         # 证据为短三元组，整条一个 chunk
         text = f"{subject} {predicate} {obj}。{context}".strip()
-        chunks = self.split_text(text, self.CHUNK_SIZE, self.CHUNK_OVERLAP)
-        return [{"text": c, "metadata": dict(metadata)} for c in chunks]
-
-
-def normalize_source(pmid=None, doi=None, url=None) -> str:
-    for value, prefix in ((pmid, "pmid:"), (doi, "doi:"), (url, "url:")):
-        if value and str(value).strip():
-            return f"{prefix}{str(value).strip()}"
-    raise ValueError("每条证据必须包含 source_pmid / source_doi / source_url 至少一种")
+        return self.create_chunk_payloads(text, metadata)
 
 
 if __name__ == "__main__":
