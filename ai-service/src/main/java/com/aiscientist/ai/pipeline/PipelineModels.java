@@ -39,11 +39,33 @@ public final class PipelineModels {
 
     // ==================== ② 文献检索 Agent 输出 ====================
 
-    /** 召回文献（复用 PaperEvidence 契约）+ 关键发现 + 引用链 */
+    /** 单条关键发现（绑定召回来源 evidenceIds，白名单可校验，严禁虚构） */
+    public record KeyFinding(
+            String finding,
+            List<String> evidenceIds
+    ) {
+        public KeyFinding {
+            finding = requireText(finding, "finding");
+            evidenceIds = immutable(evidenceIds);
+        }
+    }
+
+    /** 召回文献间的逻辑关联说明（如「A 方法基于 B 理论，共同支撑某论点」，绑定召回来源） */
+    public record CitationChain(
+            String chain,
+            List<String> evidenceIds
+    ) {
+        public CitationChain {
+            chain = requireText(chain, "chain");
+            evidenceIds = immutable(evidenceIds);
+        }
+    }
+
+    /** 文献检索输出：召回文献（papers）+ 关键发现 + 文献间逻辑关联链 */
     public record LiteratureResult(
             List<PaperEvidence> papers,
-            List<String> keyFindings,
-            List<String> citationChains
+            List<KeyFinding> keyFindings,
+            List<CitationChain> citationChains
     ) {
         public LiteratureResult {
             papers = immutable(papers);
