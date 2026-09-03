@@ -31,6 +31,10 @@ public class ProblemUnderstandingAgent {
     /** 问题拆解为重任务（管线首步，出错全链路偏）：走 Qwen-Max 分级 */
     private static final String MODEL = "qwen-max";
 
+    /** 子查询/关键概念上限：LLM 超限时截断而非中断 */
+    private static final int MAX_SUBQUERIES = 15;
+    private static final int MAX_KEY_CONCEPTS = 20;
+
     private static final String SYSTEM_PROMPT = """
             你是科研问题理解 Agent。把用户提出的科研问题拆解为结构化子查询。
             要求：
@@ -75,16 +79,25 @@ public class ProblemUnderstandingAgent {
         validate(parsed, trimmed);
 
         // 规范化重建：触发 QuestionQuery compact 构造器（非空校验 + 不可变列表），domain 空默认「通用科研」
+        // 关键概念/子查询若 LLM 超上限则截断（多识别是保守行为，不中断管线）
         String domain = parsed.domain() == null || parsed.domain().isBlank()
                 ? "通用科研" : parsed.domain().trim();
         return new QuestionQuery(
                 trimmed,
                 domain,
-                List.copyOf(parsed.subQueries()),
-                List.copyOf(parsed.keyConcepts()),
+                truncated(parsed.subQueries(), MAX_SUBQUERIES),
+                truncated(parsed.keyConcepts(), MAX_KEY_CONCEPTS),
                 List.copyOf(parsed.knownConditions() == null ? List.of() : parsed.knownConditions()),
                 List.copyOf(parsed.targetVariables() == null ? List.of() : parsed.targetVariables())
         );
+    }
+
+    /** 超上限截断（保首序）；null 安全 */
+    private static List<String> truncated(List<String> values, int max) {
+        if (values == null) {
+            return List.of();
+        }
+        return values.size() <= max ? List.copyOf(values) : List.copyOf(values.subList(0, max));
     }
 
     /** 结构校验：subQueries / keyConcepts 非空有界，其余字段容缺 */
@@ -96,17 +109,15 @@ public class ProblemUnderstandingAgent {
             throw new IllegalStateException("问题理解结果缺少 originalQuestion");
         }
         List<String> subQueries = query.subQueries() == null ? List.of() : query.subQueries();
-        if (subQueries.isEmpty() || subQueries.size() > 8) {
-            throw new IllegalStateException("问题理解结果必须包含 1 至 8 条子查询（实际 "
-                    + subQueries.size() + " 条）");
+        if (subQueries.isEmpty()) {
+            throw new IllegalStateException("问题理解结果必须包含至少一条子查询");
         }
         if (subQueries.stream().anyMatch(this::isBlank)) {
             throw new IllegalStateException("问题理解结果包含空子查询");
         }
         List<String> concepts = query.keyConcepts() == null ? List.of() : query.keyConcepts();
-        if (concepts.isEmpty() || concepts.size() > 10) {
-            throw new IllegalStateException("问题理解结果必须包含 1 至 10 个关键概念（实际 "
-                    + concepts.size() + " 个）");
+        if (concepts.isEmpty()) {
+            throw new IllegalStateException("问题理解结果必须包含至少一个关键概念");
         }
         if (concepts.stream().anyMatch(this::isBlank)) {
             throw new IllegalStateException("问题理解结果包含空关键概念");

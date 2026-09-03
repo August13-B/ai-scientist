@@ -120,6 +120,43 @@ class ProblemUnderstandingAgentTest {
     }
 
     @Test
+    void truncatesExcessiveKeyConceptsInsteadOfFailing() {
+        // LLM 识别出多于上限的概念：截断而非中断（多识别属保守行为）
+        BailianClient bailian = mock(BailianClient.class);
+        // 11 个关键概念（超过旧上限 10）
+        String many = ("{\"originalQuestion\":\"%s\",\"domain\":\"农业人工智能\","
+                + "\"subQueries\":[\"q1\",\"q2\",\"q3\"],\"keyConcepts\":[")
+                .formatted(QUESTION)
+                + "\"c1\",\"c2\",\"c3\",\"c4\",\"c5\",\"c6\",\"c7\",\"c8\",\"c9\",\"c10\",\"c11\"]}";
+        when(bailian.chat(anyString(), anyString(), anyString())).thenReturn(many);
+        ProblemUnderstandingAgent agent = new ProblemUnderstandingAgent(bailian, new ObjectMapper());
+
+        QuestionQuery query = agent.understand(QUESTION);
+
+        assertEquals(11, query.keyConcepts().size(), "11 概念未超上限 20，应全部保留");
+    }
+
+    @Test
+    void truncatesExcessiveSubQueries() {
+        BailianClient bailian = mock(BailianClient.class);
+        StringBuilder sq = new StringBuilder();
+        for (int i = 0; i < 18; i++) {
+            if (i > 0) {
+                sq.append(",");
+            }
+            sq.append("\"q").append(i).append("\"");
+        }
+        String json = ("{\"originalQuestion\":\"%s\",\"domain\":\"通用科研\","
+                + "\"subQueries\":[").formatted(QUESTION) + sq + "],\"keyConcepts\":[\"c\"]}";
+        when(bailian.chat(anyString(), anyString(), anyString())).thenReturn(json);
+        ProblemUnderstandingAgent agent = new ProblemUnderstandingAgent(bailian, new ObjectMapper());
+
+        QuestionQuery query = agent.understand(QUESTION);
+
+        assertEquals(15, query.subQueries().size(), "子查询超 15 应截断");
+    }
+
+    @Test
     void trimsOriginalQuestionToInput() {
         BailianClient bailian = mock(BailianClient.class);
         // 模型可能回显带空格的原文，输出应以输入为准
