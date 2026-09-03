@@ -132,11 +132,13 @@ public class LiteratureRetrievalAgent {
         }
 
         validate(keyFindings, citationChains, papers);
-        // 规范化重建：触发 compact 构造器（文本非空 + 不可变列表）
-        List<KeyFinding> normalizedFindings = keyFindings.stream()
-                .map(item -> new KeyFinding(item.finding().trim(),
-                        List.copyOf(item.evidenceIds())))
-                .toList();
+        // 规范化重建：触发 compact 构造器（文本非空 + 不可变列表）；keyFindings 可为空（调试模式放宽）
+        List<KeyFinding> normalizedFindings = keyFindings == null
+                ? List.of()
+                : keyFindings.stream()
+                        .map(item -> new KeyFinding(item.finding().trim(),
+                                List.copyOf(item.evidenceIds())))
+                        .toList();
         List<CitationChain> normalizedChains = citationChains == null
                 ? List.of()
                 : citationChains.stream()
@@ -219,12 +221,12 @@ public class LiteratureRetrievalAgent {
 
     /**
      * 白名单强校验：
-     * 1. keyFindings 非空；2. 每篇召回文献必须被至少一条 finding 覆盖（防漏篇）；
+     * 1. keyFindings 非空（调试模式放宽，临时关闭 RAG 时允许为空）；2. 每篇召回文献必须被至少一条 finding 覆盖（防漏篇）；
      * 3. 每条 finding/chain 的 evidenceIds 非空且全部 ∈ 召回 sourceId（防虚构）。
      */
     private void validate(List<KeyFinding> keyFindings, List<CitationChain> chains,
                           List<PaperEvidence> papers) {
-        if (keyFindings == null || keyFindings.isEmpty()) {
+        if (!mockSamples && (keyFindings == null || keyFindings.isEmpty())) {
             throw new IllegalStateException("文献检索结果必须包含至少一条关键发现");
         }
         Set<String> allowed = papers.stream()

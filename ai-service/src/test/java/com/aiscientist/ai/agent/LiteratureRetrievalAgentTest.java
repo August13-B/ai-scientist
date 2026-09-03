@@ -217,6 +217,25 @@ class LiteratureRetrievalAgentTest {
         assertThrows(IllegalArgumentException.class, () -> agent.retrieve(null));
     }
 
+    @Test
+    void mockModeAllowsEmptyKeyFindings() {
+        // 调试模式（RAG_MOCK_SAMPLES=true）：LLM 未提炼出关键发现时放行，不影响下游（④ 消费 papers）
+        BailianClient bailian = mock(BailianClient.class);
+        RagSearchService rag = mock(RagSearchService.class);
+        stubSearch(rag, "跨地区病害图像差异分析", List.of(p("p1"), p("p2")));
+        stubSearch(rag, "小样本识别方法", List.of(p("p3"), p("p4")));
+        // LLM 返回 keyFindings 为空（mock 样例未提炼出发现）
+        when(bailian.chat(anyString(), anyString(), anyString()))
+                .thenReturn("{\"keyFindings\":[],\"citationChains\":[]}");
+        LiteratureRetrievalAgent agent = new LiteratureRetrievalAgent(
+                bailian, rag, new ObjectMapper(), true);
+
+        LiteratureResult result = agent.retrieve(QUERY);
+
+        assertEquals(4, result.papers().size());
+        assertEquals(0, result.keyFindings().size(), "调试模式下允许空关键发现");
+    }
+
     // ==================== 工具 ====================
 
     private static void stubSearch(RagSearchService rag, String query, List<PaperEvidence> papers) {
