@@ -81,6 +81,7 @@ class BailianClientTest {
                 60,
                 "cfg-heavy",
                 "cfg-light",
-                "cfg-turbo");
+                "cfg-turbo",
+                "text-embedding-v4");
     }
 }

@@ -115,7 +115,7 @@ def _embed_dashscope(texts: list[str], batch_size: int) -> list[list[float]]:
     if not api_key:
         raise RuntimeError("未配置 ALIYUN_BAILIAN_API_KEY（写入 .env）")
 
-    model = os.getenv("EMBEDDING_MODEL", "text-embedding-v3")
+    model = os.getenv("EMBEDDING_MODEL", "text-embedding-v4")
     dashscope.api_key = api_key
 
     vectors: list[list[float]] = []
