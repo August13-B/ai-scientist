@@ -77,7 +77,18 @@
 
 ## 🚀 快速开始
 
-> 详细步骤见各子工程 README 与 `docs/`。
+> 详细步骤见 [docs/deployment.md](docs/deployment.md)（一键启动/调试与正式模式/环境变量/常见问题）。
+
+### 0. 一键启动（推荐）
+
+配置好 `.env` 后，仓库根目录运行（跨平台）：
+
+```bash
+python start.py                    # 交互主菜单（全部/仅ai/仅backend/仅frontend/停止）
+python start.py --only all         # 直接启动全部（默认调试模式，RAG_MOCK_SAMPLES=true）
+python start.py --prod             # 正式模式（自动起 chroma + mysql，用真实 RAG）
+python start.py --stop             # 停止全部
+```
 
 ### 1. 环境变量
 
@@ -120,6 +131,7 @@ npm run dev
 | 文档 | 内容 |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | 系统架构设计（四层 + 通信链路） |
+| [docs/deployment.md](docs/deployment.md) | 部署与启动指南（一键启动 / 调试 vs 正式模式 / 环境变量 / 常见问题） |
 | [docs/git-guide.md](docs/git-guide.md) | Git & GitHub 协作操作规范（零基础新手向，必读） |
 | [docs/agents.md](docs/agents.md) | 八 Agent 管线设计（DAG 状态流转 / 数据流 / 输出字段） |
 | [docs/rag.md](docs/rag.md) | 四库 RAG 设计（论文/方法/数据/证据库） |

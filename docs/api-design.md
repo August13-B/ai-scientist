@@ -24,7 +24,7 @@
 
 | 方法 | 路径 | 用途 | 状态 |
 |---|---|---|---|
-| POST | `/pipeline/run` | 启动七 Agent 管线（业务后端调用），返回 runId 异步执行 | ✅ |
+| POST | `/pipeline/run` | 启动八 Agent 管线（业务后端调用），返回 runId 异步执行 | ✅ |
 | POST | `/pipeline/{runId}/resume` | 人在回路恢复点：提交审阅意见/修改后候选假设，继续执行 | ✅ |
 | GET | `/pipeline/{runId}/stream` | SSE 流：Agent 状态事件（业务后端转发），支持历史重放 | ✅ |
 | POST | `/rag/search` | 四库混合检索接口（papers/methods/datasets/evidence） | ✅ |
@@ -80,4 +80,21 @@
 
 **input 契约**（框架按 AgentStage 自动取，Agent 无需感知）：① `question`；② `question+questionQuery`；
 ③ `question+questionQuery`（自足 RAG）；④ `knowledgeDiscovery+literature`；⑤ `hypothesis+humanFeedback`；
-⑥ `evaluation`；⑦ `evaluation+experiment`。均为 null 字段省略。
+⑥ `evaluation`；⑦ `evaluation+experiment`；⑧ `①-⑦ 全部产物`。均为 null 字段省略。
+
+## 5. 调试模式 vs 正式模式：前端/调用接口差异
+
+> 两种模式由 `.env` 的 `RAG_MOCK_SAMPLES` 决定（`python start.py` 默认调试 / `--prod` 切正式），详见 docs/deployment.md。
+
+| 维度 | 调试模式（`RAG_MOCK_SAMPLES=true`） | 正式模式（`RAG_MOCK_SAMPLES=false`） |
+|---|---|---|
+| RAG 数据 | 内置 mock 样例论文（真实可核验 DOI） | 真实四库（Chroma + 灌库数据） |
+| 中间件 | 无需 Chroma；backend 用 MySQL | 需 Chroma + MySQL（docker） |
+| 核心链路接口 | `POST /pipeline/run`、`GET /pipeline/{runId}/stream`、`POST /pipeline/{runId}/resume`、`GET /pipeline/{runId}/state` | 同左 |
+| 可视化/调试接口 | **额外**：`GET /pipeline/runs`、`GET /pipeline/{runId}/trace`、`GET /pipeline/{runId}/debug`（排查每个 Agent 输入输出） | 可选（生产可关闭） |
+| RAG 检索 | 无需 `POST /rag/search`（mock 内部返回） | `POST /rag/search` 可直查四库 |
+
+**前端调用约定**：
+- 核心流程（发起 → SSE 流式 → 人在回路 resume → 完成）两模式**接口一致**，前端无感切换；
+- 调试排查可额外调 `trace / runs / debug`（看每个 Agent 输入输出/状态）；
+- 前端**不必区分模式**——差异来自后端配置（`RAG_MOCK_SAMPLES`）与中间件就绪情况；`GET /pipeline/{runId}/debug` 为内嵌 HTML 页（也可由前端 iframe/链接嵌入）。
