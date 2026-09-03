@@ -91,13 +91,81 @@ public class PipelineController {
         return engine.trace(runId);
     }
 
-    /** 内嵌 HTML 调试页：可视化每个 Agent 的输入输出（自动轮询刷新） */
+    /** 调试首页：输入 runId 跳转 + 历史 run 列表 */
+    @GetMapping(value = "/debug", produces = MediaType.TEXT_HTML_VALUE)
+    public String debugHome() {
+        return DEBUG_INDEX_TEMPLATE;
+    }
+
+    /** 内嵌 HTML 调试页：可视化每个 Agent 的输入输出（增量追加，保留展开状态） */
     @GetMapping(value = "/{runId}/debug", produces = MediaType.TEXT_HTML_VALUE)
     public String debugPage(@PathVariable String runId) {
         return DEBUG_PAGE_TEMPLATE.replace("__RUN_ID__", runId);
     }
 
-    /** 单 Agent 调试页模板：fetch trace 渲染 Agent 卡片（输入/输出 JSON 折叠） */
+    /** 调试入口首页模板：runId 输入框 + run 列表（点击/回车跳转） */
+    private static final String DEBUG_INDEX_TEMPLATE = """
+            <!DOCTYPE html>
+            <html lang="zh">
+            <head>
+            <meta charset="UTF-8"><title>Agent 调试面板 · 首页</title>
+            <style>
+              body { font-family: -apple-system, Segoe UI, Microsoft YaHei, sans-serif; margin: 16px; background: #f6f7f9; }
+              h1 { font-size: 18px; } .desc { color: #666; font-size: 13px; margin-bottom: 16px; }
+              .jump { display: flex; gap: 8px; margin-bottom: 20px; }
+              input { flex: 1; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; }
+              button { padding: 10px 18px; border: 0; border-radius: 8px; background: #3b82f6; color: #fff; font-size: 14px; cursor: pointer; }
+              button:hover { background: #2f6fd0; }
+              .list-title { font-size: 14px; color: #444; margin-bottom: 8px; }
+              .item { background: #fff; border: 1px solid #e2e5ea; border-radius: 8px; padding: 10px 16px;
+                margin-bottom: 8px; cursor: pointer; display: flex; align-items: center; gap: 10px; }
+              .item:hover { border-color: #3b82f6; }
+              .rid { font-family: monospace; font-size: 12px; color: #3b82f6; }
+              .q { color: #333; font-size: 13px; flex: 1; word-break: break-all; }
+              .done { font-size: 12px; color: #22a06b; } .runing { font-size: 12px; color: #f59e0b; }
+              .empty { color: #999; font-size: 13px; }
+            </style>
+            </head>
+            <body>
+            <h1>🎛 Agent 调试面板</h1>
+            <div class="desc">输入 runId 跳转到该管线运行的 Agent 输入/输出可视化。</div>
+            <div class="jump">
+              <input id="ridInput" placeholder="请输入 runId，例如 bd682f45-677a-47ae-81d0-6908c3858e38" />
+              <button onclick="go()">跳转</button>
+            </div>
+            <div class="list-title">历史运行</div>
+            <div id="runs"><div class="empty">加载中…</div></div>
+            <script>
+            function go() {
+              const rid = document.getElementById('ridInput').value.trim();
+              if (rid) location.href = '/pipeline/' + rid + '/debug';
+            }
+            document.getElementById('ridInput').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+            async function loadRuns() {
+              try {
+                const runs = await (await fetch('/pipeline/runs')).json();
+                const box = document.getElementById('runs');
+                if (!runs.length) { box.innerHTML = '<div class="empty">暂无运行记录，先去 POST /pipeline/run 发起一个管线运行。</div>'; return; }
+                box.innerHTML = '';
+                runs.forEach(r => {
+                  const div = document.createElement('div');
+                  div.className = 'item';
+                  div.onclick = () => location.href = '/pipeline/' + r.runId + '/debug';
+                  div.innerHTML = '<span class="rid">' + r.runId.slice(0, 18) + '…</span>'
+                    + '<span class="q">' + escapeHtml(r.question || '—') + '</span>'
+                    + '<span class="' + (r.done ? 'done' : 'runing') + '">' + (r.done ? '✅ 已完成' : '⏳ 进行中') + '</span>';
+                  box.appendChild(div);
+                });
+              } catch (e) { document.getElementById('runs').innerHTML = '<div class="empty">加载失败，服务是否已启动？</div>'; }
+            }
+            function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+            loadRuns(); setInterval(loadRuns, 3000);
+            </script>
+            </body>
+            </html>
+            """;
+
+    /** 单 Run 调试页模板：增量追加 Agent 卡片（保留 details 展开状态） */
     private static final String DEBUG_PAGE_TEMPLATE = """
             <!DOCTYPE html>
             <html lang="zh">
@@ -125,6 +193,7 @@ public class PipelineController {
             <div id="cards"></div>
             <script>
             const RUN_ID = "__RUN_ID__";
+            const rendered = new Set();   // 已渲染的 Agent key，避免重建导致 <details> 收起
             async function load() {
               try {
                 const state = await (await fetch('/pipeline/' + RUN_ID + '/state')).json();
@@ -133,8 +202,10 @@ public class PipelineController {
                   + (state.finalReport ? ' ｜ ✅ 已完成（10 字段报告已产出）' : '');
                 const trace = await (await fetch('/pipeline/' + RUN_ID + '/trace')).json();
                 const box = document.getElementById('cards');
-                box.innerHTML = '';
                 trace.forEach(t => {
+                  const key = t.stage + '|' + t.agent;
+                  if (rendered.has(key)) return;   // 已渲染：保留用户展开的 details
+                  rendered.add(key);
                   const ok = t.status === 'SUCCESS';
                   const card = document.createElement('div');
                   card.className = 'card';
