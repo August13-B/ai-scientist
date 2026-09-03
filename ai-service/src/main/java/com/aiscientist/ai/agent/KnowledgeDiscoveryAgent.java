@@ -25,6 +25,8 @@ public class KnowledgeDiscoveryAgent {
 
     /** 知识发现为重任务：走 Qwen-Max 分级（BailianClient 内部映射到 QWEN_MODEL） */
     private static final String MODEL = "qwen-max";
+    /** JSON 解析失败重试次数 */
+    private static final int MAX_ATTEMPTS = 2;
 
     private final BailianClient bailianClient;
     private final RagSearchService ragSearchService;
@@ -128,13 +130,26 @@ public class KnowledgeDiscoveryAgent {
             Object input,
             Class<T> outputType
     ) {
+        String userMessage;
         try {
-            String userMessage = objectMapper.writeValueAsString(input);
-            String response = bailianClient.chat(MODEL, systemPrompt, userMessage);
-            return objectMapper.readValue(stripCodeFence(response), outputType);
-        } catch (JsonProcessingException | IllegalArgumentException exception) {
-            throw new IllegalStateException(stage + "返回了无效 JSON", exception);
+            userMessage = objectMapper.writeValueAsString(input);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException(stage + "参数序列化失败", exception);
         }
+        // 解析失败重试 1 次（提示重出纯 JSON），并提取最外层 JSON 对象（容忍前后解释文字/``` 块）
+        String lastError = null;
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            String response = bailianClient.chat(MODEL, systemPrompt, userMessage);
+            try {
+                return objectMapper.readValue(extractJsonObject(response), outputType);
+            } catch (JsonProcessingException | IllegalArgumentException exception) {
+                lastError = stage + "返回了无效 JSON（第 " + attempt + " 次）：" + exception.getMessage();
+                if (attempt < MAX_ATTEMPTS) {
+                    systemPrompt += "\n上一次输出无法解析。请只输出一个合法的 JSON 对象，不要任何解释文字。";
+                }
+            }
+        }
+        throw new IllegalStateException(lastError == null ? stage + "返回了无效 JSON" : lastError);
     }
 
     private void validateResultSources(
@@ -187,19 +202,16 @@ public class KnowledgeDiscoveryAgent {
         }
     }
 
-    private String stripCodeFence(String response) {
+    /** 提取最外层 JSON 对象：剥 ``` 块 + 容忍前后解释文字（取第一个 { 到最后一个 }） */
+    private String extractJsonObject(String response) {
         if (response == null) {
             throw new IllegalArgumentException("model response must not be null");
         }
-        String json = response.trim();
-        if (json.startsWith("```")) {
-            int firstLineEnd = json.indexOf('\n');
-            int lastFence = json.lastIndexOf("```");
-            if (firstLineEnd < 0 || lastFence <= firstLineEnd) {
-                throw new IllegalArgumentException("invalid JSON code fence");
-            }
-            json = json.substring(firstLineEnd + 1, lastFence).trim();
+        int start = response.indexOf('{');
+        int end = response.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            throw new IllegalArgumentException("model response 中没有 JSON 对象");
         }
-        return json;
+        return response.substring(start, end + 1);
     }
 }
