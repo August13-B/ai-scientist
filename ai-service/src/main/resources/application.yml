@@ -36,6 +36,9 @@ vector:
   milvus:
     host: ${MILVUS_HOST:localhost}
     port: ${MILVUS_PORT:19530}
+  # 通用向量嵌入模型（检索端 query 编码，须与灌库向量模型一致：text-embedding-v4, 1024 维）
+  embedding-model: ${EMBEDDING_MODEL:text-embedding-v4}
+  embedding-dimensions: ${EMBEDDING_DIMENSIONS:1024}
 
 logging:
   level:

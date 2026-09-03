@@ -20,7 +20,7 @@ import java.util.Map;
 /**
  * 四库 RAG 检索服务（Chroma REST 实现）。
  *
- * <p>检索链路：query 文本 → 百炼 embedding（text-embedding-v3）→ Chroma
+ * <p>检索链路：query 文本 → 百炼 embedding（text-embedding-v4）→ Chroma
  * {@code POST /api/v1/collections/{name}/query} 向量检索 → 结果映射回
  * {@link PaperEvidence}（title/content/doi/pmid/url/authors/year，与灌库脚本
  * metadata 契约对齐，见 docs/rag.md 第 5 节）。</p>
@@ -39,7 +39,7 @@ import java.util.Map;
 @Service
 public class RagSearchService {
 
-    private static final String EMBEDDING_MODEL = "text-embedding-v3";
+    private static final String EMBEDDING_MODEL = "text-embedding-v4";
     private static final String QUERY_PATH = "/api/v1/collections/%s/query";
 
     /** 本地调试样例论文（水稻病害检测方向，DOI 均经 Crossref 实测 HTTP 200） */

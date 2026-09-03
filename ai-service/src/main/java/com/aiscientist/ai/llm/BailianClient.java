@@ -37,6 +37,7 @@ public class BailianClient {
     private final Map<String, String> modelAliases;
 
     private final String baseUrl;
+    private final String embeddingModel;
     private final String apiKey;
     private final double temperature;
     private final Duration timeout;
@@ -50,12 +51,14 @@ public class BailianClient {
             @Value("${BAILIAN_TIMEOUT_SECONDS:60}") long timeoutSeconds,
             @Value("${QWEN_MODEL:qwen-max}") String heavyModel,
             @Value("${QWEN_LIGHT_MODEL:qwen-plus}") String lightModel,
-            @Value("${QWEN_TURBO_MODEL:qwen-turbo}") String turboModel
+            @Value("${QWEN_TURBO_MODEL:qwen-turbo}") String turboModel,
+            @Value("${vector.embedding-model:text-embedding-v4}") String embeddingModel
     ) {
         this.baseUrl = trimTrailingSlash(baseUrl);
         this.apiKey = apiKey == null ? "" : apiKey.trim();
         this.temperature = temperature;
         this.timeout = Duration.ofSeconds(timeoutSeconds);
+        this.embeddingModel = embeddingModel;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(this.timeout)
                 .build();
@@ -104,7 +107,7 @@ public class BailianClient {
             return List.of();
         }
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", "text-embedding-v3");
+        body.put("model", embeddingModel);
         body.put("input", texts);
 
         String response = postWithRetry("/embeddings", body, 1);
