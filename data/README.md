@@ -19,6 +19,8 @@ python scripts/pdf_parser.py --input ./pdfs --output ./processed
 
 ## 四库灌库（RAG）
 
+> 🚨 **字段标准**：灌库前必读 **[docs/rag-field-standard.md](../docs/rag-field-standard.md)**（JSONL 输入契约 / 入库 metadata / title 等价字段 / source_id 规则）；标准执行版校验脚本见下方 `validate_records.py`。
+
 数据清洗产物为 JSONL（每行一条，必带来源标识），灌库脚本写入 Chroma（开发）/ Milvus（生产）：
 
 ```bash
@@ -28,7 +30,10 @@ docker compose up -d chroma
 # 2. 配置 .env（ALIYUN_BAILIAN_API_KEY 必填，供 Embedding 用）
 cp ../.env.example ../.env
 
-# 3. 四库分别灌入
+# 3. 灌库前校验（四库逐份通过后再灌，exit code 0 才允许继续）
+python scripts/validate_records.py --input data/processed
+
+# 4. 四库分别灌入
 python scripts/ingest_papers.py --input data/processed/papers.jsonl
 python scripts/ingest_methods.py --input data/processed/methods.jsonl
 python scripts/ingest_datasets.py --input data/processed/datasets.jsonl
@@ -48,6 +53,7 @@ data/
 │   ├── pdf_parser.py       # PDF 批量解析脚本（骨架）
 │   ├── rag_common.py       # 公共配置：向量库连接 + Embedding（百炼）
 │   ├── rag_base.py         # 灌库公共基类（JSONL→分块→向量化→入库）
+│   ├── validate_records.py # 灌库输入 JSONL 契约校验（标准：docs/rag-field-standard.md）
 │   ├── ingest_papers.py    # 论文库灌库（collection: papers）
 │   ├── ingest_methods.py   # 方法库灌库（collection: methods）
 │   ├── ingest_datasets.py  # 数据集库灌库（collection: datasets）
