@@ -14,6 +14,18 @@ langchain4j:
       model-name: ${QWEN_MODEL:qwen-max}
       temperature: 0.7
 
+# 实验设计 Agent（王婉莹）专属配置，对齐 .env 百炼变量
+jiebang:
+  agent:
+    experiment-design:
+      repository: ${EVIDENCE_REPOSITORY:file}   # file 激活 FileEvidenceRepository（EvidenceRepository 唯一实现）
+      evidence-file: ${EVIDENCE_FILE:./data/evidence.jsonl}  # 不存在时仓库为空，不影响启动
+      llm:
+        api-key: ${ALIYUN_BAILIAN_API_KEY:}
+        base-url: ${langchain4j.open-ai.chat-model.base-url}
+        model: ${QWEN_MODEL:qwen-max}
+        temperature: 0.2
+
 # 向量数据库（chroma | milvus，schema 由团队确定，见 docs/rag.md）
 vector:
   db: ${VECTOR_DB:chroma}
