@@ -123,6 +123,7 @@ npm run dev
 | [docs/git-guide.md](docs/git-guide.md) | Git & GitHub 协作操作规范（零基础新手向，必读） |
 | [docs/agents.md](docs/agents.md) | 七 Agent 管线设计（DAG 状态流转 / 数据流 / 输出字段） |
 | [docs/rag.md](docs/rag.md) | 四库 RAG 设计（论文/方法/数据/证据库） |
+| [docs/rag-field-standard.md](docs/rag-field-standard.md) | **四库灌库字段标准**（JSONL/metadata/title/source_id 契约 + 校验脚本） |
 | [docs/tech-plan.md](docs/tech-plan.md) | 赛题技术方案（对标提交 PDF） |
 | [docs/api-design.md](docs/api-design.md) | 接口清单（字段由后端组设计确定） |
 | [docs/database.md](docs/database.md) | 数据库设计（预留，由后端组设计） |
