@@ -195,3 +195,21 @@ Stage 将最优假设、研究领域、主要结果变量和已验证来源构�
 ```powershell
 mvn -f ai-service/pom.xml verify --batch-mode --no-transfer-progress
 ```
+
+### 7.3 假设生成 Agent（已接入）
+
+假设生成阶段由 `HypothesisGenerationStage implements PipelineAgent` 接入统一流水线，
+声明阶段为 `AgentStage.HYPOTHESIS`。它读取知识发现的 selectedProblem、Research Gap、
+已知发现、限制与迁移机会，同时消费文献检索结果。
+
+`HypothesisGenerationAgent` 复用统一 `RagSearchService`：检索 `methods` 与 `evidence`
+collection；当上游没有直接文献时补查 `papers`。检索结果沿用既有 `PaperEvidence`
+契约，不修改 RAG 公共服务和向量库配置。
+
+模型通过 `BailianClient` 调用百炼 Qwen，输出 3–5 条 `PipelineModels.Hypothesis`。
+每条假设必须包含 summary、rationale、technicalDetails、methods、reasoningChain 和
+evidenceIds。所有 evidenceIds 必须来自知识发现 references、文献结果或 RAG 检索结果
+的 DOI/PMID/URL 白名单；发现虚构或越界引用时阶段立即失败。
+
+对应测试为 `HypothesisGenerationAgentTest` 与 `HypothesisGenerationStageTest`，覆盖
+方法库/证据库检索、管线上下文映射、结构化输出和虚构证据拒绝。
