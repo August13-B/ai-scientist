@@ -79,6 +79,87 @@ public class PipelineController {
         return engine.state(runId);
     }
 
+    /** 全部已启动的 run（进行中/暂停/已完成），调试列表用 */
+    @GetMapping("/runs")
+    public List<PipelineEngine.RunInfo> runs() {
+        return engine.runs();
+    }
+
+    /** Agent 级执行追踪 JSON（input/output/耗时/状态，前端可消费） */
+    @GetMapping("/{runId}/trace")
+    public List<AgentTraceRecord> trace(@PathVariable String runId) {
+        return engine.trace(runId);
+    }
+
+    /** 内嵌 HTML 调试页：可视化每个 Agent 的输入输出（自动轮询刷新） */
+    @GetMapping(value = "/{runId}/debug", produces = MediaType.TEXT_HTML_VALUE)
+    public String debugPage(@PathVariable String runId) {
+        return DEBUG_PAGE_TEMPLATE.replace("__RUN_ID__", runId);
+    }
+
+    /** 单 Agent 调试页模板：fetch trace 渲染 Agent 卡片（输入/输出 JSON 折叠） */
+    private static final String DEBUG_PAGE_TEMPLATE = """
+            <!DOCTYPE html>
+            <html lang="zh">
+            <head>
+            <meta charset="UTF-8"><title>Agent 调试面板</title>
+            <style>
+              body { font-family: -apple-system, Segoe UI, Microsoft YaHei, sans-serif; margin: 16px; background: #f6f7f9; }
+              h1 { font-size: 18px; } .meta { color: #666; font-size: 13px; margin-bottom: 12px; word-break: break-all; }
+              .card { background: #fff; border: 1px solid #e2e5ea; border-radius: 8px;
+                padding: 12px 16px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+              .head { display: flex; align-items: center; gap: 10px; }
+              .stage { font-weight: 600; font-size: 14px; }
+              .badge { padding: 2px 8px; border-radius: 10px; font-size: 12px; color: #fff; }
+              .ok { background: #22a06b; } .fail { background: #e5484d; } .run { background: #3b82f6; }
+              .time { color: #888; font-size: 12px; margin-left: auto; }
+              details { margin-top: 8px; border-top: 1px dashed #e8eaef; padding-top: 6px; }
+              summary { cursor: pointer; font-size: 13px; color: #3b82f6; user-select: none; }
+              pre { background: #f0f2f5; padding: 8px; border-radius: 6px; overflow: auto; font-size: 12px; max-height: 260px; }
+              .err { color: #e5484d; margin-top: 6px; font-size: 13px; }
+            </style>
+            </head>
+            <body>
+            <h1>🎛 Agent 调试面板</h1>
+            <div class="meta" id="meta">runId: __RUN_ID__</div>
+            <div id="cards"></div>
+            <script>
+            const RUN_ID = "__RUN_ID__";
+            async function load() {
+              try {
+                const state = await (await fetch('/pipeline/' + RUN_ID + '/state')).json();
+                document.getElementById('meta').textContent =
+                  'runId: ' + RUN_ID + ' ｜ 问题: ' + (state.question || '—')
+                  + (state.finalReport ? ' ｜ ✅ 已完成（10 字段报告已产出）' : '');
+                const trace = await (await fetch('/pipeline/' + RUN_ID + '/trace')).json();
+                const box = document.getElementById('cards');
+                box.innerHTML = '';
+                trace.forEach(t => {
+                  const ok = t.status === 'SUCCESS';
+                  const card = document.createElement('div');
+                  card.className = 'card';
+                  card.innerHTML =
+                    '<div class="head"><span class="badge ' + (ok ? 'ok' : 'fail') + '">'
+                    + (ok ? '✓ 成功' : '✗ 失败') + '</span>'
+                    + '<span class="stage">' + t.stage + '</span>'
+                    + '<span>' + t.agent + '</span>'
+                    + '<span class="time">' + t.durationMillis + ' ms</span></div>'
+                    + (t.errorMessage ? '<div class="err">⚠ ' + escapeHtml(t.errorMessage) + '</div>' : '')
+                    + '<details><summary>📥 输入</summary><pre>' + escapeHtml(pretty(t.input)) + '</pre></details>'
+                    + '<details><summary>📤 输出</summary><pre>' + escapeHtml(pretty(t.output)) + '</pre></details>';
+                  box.appendChild(card);
+                });
+              } catch (e) { /* 管线尚未就绪/已结束，继续轮询 */ }
+            }
+            function pretty(obj) { try { return JSON.stringify(obj, null, 2); } catch (e) { return String(obj); } }
+            function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+            load();
+            setInterval(load, 2000);
+            </script>
+            </body>
+            </html>
+            """;
+
     /** 四库 RAG 检索（papers / methods / datasets / evidence） */
     @PostMapping(value = "/rag/search", consumes = MediaType.APPLICATION_JSON_VALUE)
     public List<com.aiscientist.ai.agent.KnowledgeDiscoveryModels.PaperEvidence> ragSearch(

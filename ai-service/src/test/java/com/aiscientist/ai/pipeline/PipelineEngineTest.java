@@ -227,6 +227,90 @@ class PipelineEngineTest {
                 event -> event.eventType().equals("pipeline.error")));
     }
 
+    @Test
+    void asynchronousTraceContainsInputOutputAndFailure() throws Exception {
+        // 异步 trace：成功 Agent 记 SUCCESS+input/output；失败 Agent 记 FAILED+errorMessage
+        TestEventPublisher publisher = new TestEventPublisher();
+        PipelineEngine engine = new PipelineEngine(List.of(
+                agent(AgentStage.UNDERSTANDING, ctx -> ctx.setQuestionQuery(
+                        new PipelineModels.QuestionQuery(
+                                ctx.getQuestion(), "农业人工智能",
+                                List.of("子查询一"), List.of("概念"), List.of(), List.of()))),
+                agent(AgentStage.KNOWLEDGE, ctx -> {
+                    if (ctx.getQuestionQuery() == null) {
+                        throw new IllegalStateException("缺少问题理解输出");
+                    }
+                    ctx.setKnowledgeDiscovery(discoveryResult());
+                })
+        ), publisher);
+
+        String runId = engine.start("研究问题");
+        // ④ 后人在回路暂停：resume 释放后才继续到 done
+        awaitEvent(publisher, "pipeline.pause", 5);
+        engine.resume(runId, new PipelineModels.HumanFeedback("通过", List.of()));
+        engine.completion(runId).get(5, TimeUnit.SECONDS);
+
+        List<AgentTraceRecord> trace = engine.trace(runId);
+        assertEquals(2, trace.size());
+        AgentTraceRecord understanding = trace.get(0);
+        assertEquals("SUCCESS", understanding.status());
+        assertEquals("UNDERSTANDING", understanding.stage());
+        assertTrue(understanding.input().containsKey("question"));
+        assertEquals("研究问题", understanding.input().get("question"));
+        assertNotNull(understanding.output());
+        assertTrue(understanding.durationMillis() >= 0);
+
+        AgentTraceRecord knowledge = trace.get(1);
+        assertEquals("SUCCESS", knowledge.status());
+        assertEquals("KNOWLEDGE", knowledge.stage());
+        assertTrue(knowledge.input().containsKey("questionQuery"));
+        assertNotNull(knowledge.output());
+    }
+
+    @Test
+    void traceRecordsFailedAgentWithErrorMessage() throws Exception {
+        // 失败 Agent：trace 记 FAILED + errorMessage，且 input 快照仍在
+        TestEventPublisher publisher = new TestEventPublisher();
+        PipelineEngine engine = new PipelineEngine(List.of(
+                agent(AgentStage.UNDERSTANDING, ctx -> {
+                    throw new IllegalStateException("模型返回无效 JSON");
+                })
+        ), publisher);
+
+        assertThrows(IllegalStateException.class, () -> engine.run("研究问题"));
+        // 同步 run 的 runtime 未注册；异步 start 场景验证 trace
+        String runId = engine.start("研究问题");
+        assertThrows(java.util.concurrent.ExecutionException.class,
+                () -> engine.completion(runId).get(5, TimeUnit.SECONDS));
+        List<AgentTraceRecord> trace = engine.trace(runId);
+        assertEquals(1, trace.size());
+        assertEquals("FAILED", trace.get(0).status());
+        assertTrue(trace.get(0).errorMessage().contains("模型返回无效 JSON"));
+        assertTrue(trace.get(0).input().containsKey("question"));
+        assertEquals(null, trace.get(0).output());
+    }
+
+    @Test
+    void listsStartedRuns() throws Exception {
+        // runs()：列出已启动 run 与完成状态
+        TestEventPublisher publisher = new TestEventPublisher();
+        PipelineEngine engine = new PipelineEngine(List.of(
+                agent(AgentStage.KNOWLEDGE, ctx -> ctx.setKnowledgeDiscovery(discoveryResult()))
+        ), publisher);
+
+        String runId = engine.start("研究问题");
+        awaitEvent(publisher, "pipeline.pause", 5);
+        engine.resume(runId, new PipelineModels.HumanFeedback("通过", List.of()));
+        engine.completion(runId).get(5, TimeUnit.SECONDS);
+
+        List<PipelineEngine.RunInfo> runs = engine.runs();
+        assertEquals(1, runs.size());
+        assertEquals(runId, runs.get(0).runId());
+        assertEquals("研究问题", runs.get(0).question());
+        assertTrue(runs.get(0).done());
+        assertThrows(IllegalArgumentException.class, () -> engine.trace("unknown"));
+    }
+
     // ==================== 测试工具 ====================
 
     /** 假 Agent：记录执行顺序或执行自定义动作（动作可访问数据总线 ctx） */
