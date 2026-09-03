@@ -164,19 +164,36 @@ def start_backend(env):
     start_service("backend", backend_dir, [java_cmd(), "-jar", str(jar)], env=env)
 
 
-def start_mysql():
+def docker_available() -> bool:
+    """检查 docker CLI 存在且 daemon 可运行（Docker Desktop 是否启动）。"""
     docker = shutil.which("docker")
     if not docker:
-        print("[warn] 未检测到 docker，无法自动启动 MySQL（backend 需 MySQL，请手动起）")
+        return False
+    try:
+        result = subprocess.run([docker, "info"],
+                                capture_output=True, timeout=5, cwd=ROOT)
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def docker_missing_hint(kind: str) -> None:
+    print(f"[warn] 未检测到可用的 Docker，无法自动启动 {kind}。")
+    print(f"        请先启动 Docker Desktop，或手动执行：docker compose up -d {kind} "
+          f"（在本项目根目录）")
+
+
+def start_mysql():
+    if not docker_available():
+        docker_missing_hint("MySQL（backend 需要）")
         return
     print("[docker] 启动 MySQL…")
     subprocess.run(["docker", "compose", "up", "-d", "mysql"], cwd=ROOT)
 
 
 def start_chroma():
-    docker = shutil.which("docker")
-    if not docker:
-        print("[warn] 未检测到 docker，无法自动启动 Chroma（正式模式需要）")
+    if not docker_available():
+        docker_missing_hint("Chroma（正式模式 RAG 需要）")
         return
     print("[docker] 启动 Chroma…")
     subprocess.run(["docker", "compose", "up", "-d", "chroma"], cwd=ROOT)
