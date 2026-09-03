@@ -216,6 +216,23 @@ def run_target(target, env, prod):
         stop_all()
 
 
+def mode_banner(prod: bool) -> str:
+    """返回当前模式横幅文案。"""
+    if prod:
+        return (
+            "🧊 当前模式：生产模式（正式）\n"
+            "   · RAG_MOCK_SAMPLES=false（真实四库）\n"
+            "   · 需 Chroma（已导入四库向量）+ MySQL\n"
+            "   · 引用/数据集防幻觉严格生效\n"
+        )
+    return (
+        "🟢 当前模式：调试模式（本地联调，默认）\n"
+        "   · RAG_MOCK_SAMPLES=true（内置 mock 样例论文）\n"
+        "   · 无需 Chroma / RAG 数据即可跑通 ①-⑧\n"
+        "   · 引用严格校验放宽（测试环境不需要防幻觉）\n"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="AI Scientist 一键启动")
     parser.add_argument("--only", nargs="?", default=None, const="all",
@@ -236,29 +253,45 @@ def main():
         run_target(args.only, env, args.prod)
         return
 
-    # 交互主菜单
-    print("=== AI Scientist 一键启动 ===")
-    print("  1. 启动全部（ai-service + backend + frontend + 中间件）")
-    print("  2. 仅 ai-service")
-    print("  3. 仅 backend（含 MySQL）")
-    print("  4. 仅 frontend")
-    print("  5. 停止全部")
-    print("  6. 退出")
-    choice = input("请选择 (1-6): ").strip()
-    if choice == "1":
-        run_target("all", env, args.prod)
-    elif choice == "2":
-        run_target("ai", env, args.prod)
-    elif choice == "3":
-        run_target("backend", env, args.prod)
-    elif choice == "4":
-        run_target("frontend", env, args.prod)
-    elif choice == "5":
-        stop_all()
-    elif choice == "6":
-        print("再见")
-    else:
-        print("无效选择")
+    # 免交互模式：启动前打印模式说明
+    if args.only:
+        print(mode_banner(args.prod))
+        run_target(args.only, env, args.prod)
+        return
+
+    # 交互主菜单：支持切换调试/生产模式
+    prod = args.prod
+    while True:
+        print(mode_banner(prod))
+        print("  [切换] 用 python start.py --prod 进入生产；或下面选 6 切换\n")
+        print("=== 一键启动菜单 ===")
+        print("  1. 启动全部（ai-service + backend + frontend + 中间件）")
+        print("  2. 仅 ai-service")
+        print("  3. 仅 backend（含 MySQL）")
+        print("  4. 仅 frontend")
+        print("  5. 停止全部")
+        print("  6. 切换 调试/生产 模式")
+        print("  7. 退出")
+        choice = input("请选择 (1-7): ").strip()
+        env = prepare_environment(ROOT / ".env", prod)
+        if choice == "1":
+            run_target("all", env, prod)
+        elif choice == "2":
+            run_target("ai", env, prod)
+        elif choice == "3":
+            run_target("backend", env, prod)
+        elif choice == "4":
+            run_target("frontend", env, prod)
+        elif choice == "5":
+            stop_all()
+        elif choice == "6":
+            prod = not prod
+            print(f"\n⏺ 已切换到 {'生产' if prod else '调试'} 模式\n")
+        elif choice == "7":
+            print("再见")
+            return
+        else:
+            print("无效选择\n")
 
 
 if __name__ == "__main__":
