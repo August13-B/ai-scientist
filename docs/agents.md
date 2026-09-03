@@ -213,3 +213,24 @@ evidenceIds。所有 evidenceIds 必须来自知识发现 references、文献结
 
 对应测试为 `HypothesisGenerationAgentTest` 与 `HypothesisGenerationStageTest`，覆盖
 方法库/证据库检索、管线上下文映射、结构化输出和虚构证据拒绝。
+
+### 7.4 问题理解 Agent（已接入）
+
+问题理解阶段由 `ProblemUnderstandingStage implements PipelineAgent` 接入统一流水线，
+声明阶段为 `AgentStage.UNDERSTANDING`（管线首步，串行最先执行）。它读取
+`ctx.getQuestion()`，拆解为结构化子查询后写入 `ctx.setQuestionQuery()`。
+
+`ProblemUnderstandingAgent` 调用百炼 Qwen（qwen-max 分级）输出 `QuestionQuery`：
+`originalQuestion` / `domain` / `subQueries`（3~5 条问题拆解子查询，供 ② 逐条检索）/
+`keyConcepts`（3~8 个，中英文均可）/ `knownConditions`（可空）/ `targetVariables`（可空）。
+
+输出校验：subQueries 非空且 ≤8、keyConcepts 非空且 ≤10，每条非空；domain 缺失时
+默认「通用科研」（不写死 SSD 等学科）；originalQuestion 以管线输入原文为准。校验通过后
+规范化重建 QuestionQuery（触发 compact 构造器校验与不可变列表）。
+
+下游消费：② 文献检索按 subQueries 逐条检索论文库/证据库；③ 知识发现、④ 假设生成取
+domain 作为检索域。对应测试为 `ProblemUnderstandingAgentTest`（8 例），覆盖正常拆解、
+domain 默认值、空条件容缺、结构打回（缺子查询/空概念）、无效 JSON、代码块包裹与原文
+trim。
+
+> 2026-09-02：张睿实现。本 Agent 校验不依赖 LLM 之外的引用，无虚构风险面。
