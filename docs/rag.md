@@ -3,6 +3,8 @@
 > 更新时间：2026-09-01（第二版）
 > 本文档固化设计原则、分工与**灌库实现契约**。向量化模型/分块策略/collection 命名已随灌库脚本落地；检索侧字段对齐见本文档第 5 节。
 
+> 🚨 **灌库字段级标准见 [docs/rag-field-standard.md](rag-field-standard.md)**（JSONL 输入/入库 metadata/title 等价/source_id 契约 + 校验脚本 validate_records.py）；字段定义冲突时以该标准为准并回改本文档。
+
 ## 0. 实现状态（2026-09-01 更新）
 
 | 模块 | 状态 | 位置 |

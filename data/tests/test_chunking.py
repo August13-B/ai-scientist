@@ -61,6 +61,8 @@ class CommonContractTest(unittest.TestCase):
             self.assertEqual(set(first[0]), {"id", "text", "metadata"})
             metadata = first[0]["metadata"]
             self.assertTrue(metadata["source_id"])
+            # 检索侧 PaperEvidence 强制 title 非空（docs/rag-field-standard.md §5）
+            self.assertTrue(metadata.get("title"), f"metadata 缺少 title（{record}）")
             self.assertEqual(metadata["chunk_index"], 0)
             self.assertEqual(metadata["chunk_total"], len(first))
             self.assertIn("chunk_start", metadata)
