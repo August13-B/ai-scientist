@@ -6,6 +6,7 @@ import com.aiscientist.ai.pipeline.PipelineModels;
 import com.aiscientist.ai.pipeline.ResearchPlan;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -39,30 +40,37 @@ public class ReportGenerationAgent {
             （⑤）、怎么设计实验验证（⑥）、经受了怎样的正反辩论（⑦）。
 
             强制规则：
-            1. 只输出一个 JSON 对象（不要 markdown 代码块、不要解释文字），结构如下，每个字段必须用中文填写：
+            1. 只输出一个 JSON 对象（不要 markdown 代码块、不要解释文字），结构如下，每个字段必须用中文精确填写：
             {
-              "problemStatement": "待研究问题",
-              "rationale": "解决思路（融入 ④ 假设的推理与 ⑦ 辩论共识）",
-              "technicalDetails": ["必要技术手段"],
-              "datasets": {"source": ["历史/来源数据"], "target": ["验证拟采集数据"]},
-              "paperTitle": "标题",
-              "paperAbstract": "摘要（≤200字）",
-              "methods": ["方法论"],
+              "paperTitle": "符合学术出版规范的标题",
+              "paperAbstract": "完整摘要：背景 + 方法（技术路线） + 预期结果，≤250字",
+              "problemStatement": "明确指出当前领域存在的具体局限性（含局限/瓶颈）",
+              "rationale": "基于逻辑推理的创新点阐述，展示推导链条（从 Gap 到思路的推理）",
+              "technicalDetails": ["具体技术栈：写明具体统计/机器学习/深度学习方法名，不用泛化词"],
+              "datasets": {"source": ["历史/来源数据（Source）"], "target": ["验证拟采集数据特征（Target）"]},
+              "methods": ["具体实施步骤：模型架构或实验流程的步骤"],
               "experiments": {"baselines": ["对比基线"], "metrics": ["评估指标"]},
-              "results": "预期结果（含范围/判定条件，融入 ⑦ 辩论后的完善）",
+              "results": "预期结果：给出范围/判定阈值（如 F1 提升 5%-10%），体现公式推导或模拟验证的可行性",
               "references": ["doi:...或pmid:...或url:..."]
             }
             2. references 只能从下方 allowedReferences 中选择，禁止虚构任何文献、来源、数据；
-            3. 所有字段必须非空，datasets 的 source/target 若空缺用「待确认」；
-            4. 结论要明确：这是一个多智能体协作得出的可执行研究方案。
+            3. abstract 必须同时包含背景、方法、预期结果三要素；
+            4. technicalDetails / methods 必须是具体方法或步骤，而非空泛描述；
+            5. datasets 的 source/target 若空缺用「待确认」，不得编造具体数据集名；
+            6. results 必须给出可量化的范围/阈值或可行性判定条件。
+            7. 结论要明确：这是一个多智能体协作得出的可执行研究方案。
             """;
 
     private final BailianClient bailianClient;
     private final ObjectMapper objectMapper;
+    /** 调试模式（RAG_MOCK_SAMPLES=true）：datasets/references 不强防幻觉；生产模式锁定真实来源 */
+    private final boolean mockSamples;
 
-    public ReportGenerationAgent(BailianClient bailianClient, ObjectMapper objectMapper) {
+    public ReportGenerationAgent(BailianClient bailianClient, ObjectMapper objectMapper,
+                                 @Value("${vector.mock-samples:false}") boolean mockSamples) {
         this.bailianClient = bailianClient;
         this.objectMapper = objectMapper;
+        this.mockSamples = mockSamples;
     }
 
     /**
@@ -166,11 +174,18 @@ public class ReportGenerationAgent {
         String results = firstNonBlank(dto.results(),
                 experiment == null ? null : experiment.expectedResults(), PENDING);
 
-        // 4. 数据集：LLM 给出则用；缺失回退 ⑥ / 待确认
-        List<String> source = nonBlankOrDefault(dto.datasets() == null ? null : dto.datasets().source(),
-                List.of(), List.of("待确认"));
-        List<String> target = nonBlankOrDefault(dto.datasets() == null ? null : dto.datasets().target(),
-                List.of(), List.of("待确认"));
+        // 4. 数据集：生产模式锁定真实来源（防编造）；测试模式（mock）用 LLM 生成
+        List<String> source;
+        List<String> target;
+        if (mockSamples) {
+            source = nonBlankOrDefault(dto.datasets() == null ? null : dto.datasets().source(),
+                    List.of(), List.of("待确认"));
+            target = nonBlankOrDefault(dto.datasets() == null ? null : dto.datasets().target(),
+                    List.of(), List.of("待确认"));
+        } else {
+            source = lockedSourceDatasets(experiment);
+            target = lockedTargetDatasets(ctx);
+        }
 
         // 8. 实验设计
         List<String> baselines = nonBlankOrDefault(
@@ -211,6 +226,28 @@ public class ReportGenerationAgent {
     private String bestRationale(PipelineContext ctx) {
         PipelineModels.Hypothesis h = bestHypothesis(ctx);
         return h == null ? null : h.rationale();
+    }
+
+    /** 生产模式：Source 锁定到 ⑥ 实验设计产物（真实数据集），否则待确认 */
+    private List<String> lockedSourceDatasets(PipelineModels.ExperimentResult experiment) {
+        if (experiment == null || experiment.datasets() == null || experiment.datasets().isEmpty()) {
+            return List.of("待确认");
+        }
+        return experiment.datasets().stream()
+                .filter(item -> item != null && !item.isBlank())
+                .toList();
+    }
+
+    /** 生产模式：Target 从⑤核验通过的真实引用（领域证据特征）取，无则待确认 */
+    private List<String> lockedTargetDatasets(PipelineContext ctx) {
+        List<String> target = new java.util.ArrayList<>();
+        PipelineModels.EvaluationResult evaluation = ctx.getEvaluation();
+        if (evaluation != null && evaluation.references() != null) {
+            evaluation.references().stream()
+                    .filter(item -> item != null && !item.isBlank())
+                    .forEach(target::add);
+        }
+        return target.isEmpty() ? List.of("待确认") : List.copyOf(target);
     }
 
     private List<String> bestTechnicalDetails(PipelineContext ctx) {

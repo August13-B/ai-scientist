@@ -38,7 +38,7 @@ class ReportGenerationAgentTest {
     void generatesTenFieldReportFromAllAgents() {
         BailianClient bailian = mock(BailianClient.class);
         when(bailian.chat(anyString(), anyString(), anyString())).thenReturn(VALID_REPORT);
-        ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper());
+        ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper(), false);
 
         ResearchPlan plan = agent.generate(context());
 
@@ -56,7 +56,7 @@ class ReportGenerationAgentTest {
         when(bailian.chat(anyString(), anyString(), anyString()))
                 .thenReturn(VALID_REPORT.replace("doi:10.21275/sr231218142714",
                         "doi:10.1000/fake"));
-        ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper());
+        ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper(), false);
 
         ResearchPlan plan = agent.generate(context());
 
@@ -70,7 +70,7 @@ class ReportGenerationAgentTest {
         when(bailian.chat(anyString(), anyString(), anyString()))
                 .thenReturn(VALID_REPORT.replace("\"references\":[\"doi:10.21275/sr231218142714\"]",
                         "\"references\":[]"));
-        ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper());
+        ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper(), false);
 
         ResearchPlan plan = agent.generate(context());
 
@@ -84,7 +84,7 @@ class ReportGenerationAgentTest {
         when(bailian.chat(anyString(), anyString(), anyString()))
                 .thenReturn(VALID_REPORT.replace("\"rationale\":\"多 Agent 协作得出：以迁移学习为中心，融合 ④ 推理与 ⑦ 辩论共识\"",
                         "\"rationale\":\"\""));
-        ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper());
+        ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper(), false);
 
         ResearchPlan plan = agent.generate(context());
 
@@ -95,9 +95,28 @@ class ReportGenerationAgentTest {
     void rejectsMalformedModelJson() {
         BailianClient bailian = mock(BailianClient.class);
         when(bailian.chat(anyString(), anyString(), anyString())).thenReturn("{not-json");
-        ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper());
+        ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper(), false);
 
         assertThrows(IllegalStateException.class, () -> agent.generate(context()));
+    }
+
+    @Test
+    void productionModeLocksDatasetsFromRealSources() {
+        // 生产模式：datasets 不来自 LLM 编造，Source 锁定到⑥实验设计产物、Target 来自⑤核验引用
+        BailianClient bailian = mock(BailianClient.class);
+        // dto 里 datasets 是编造的 "plantvillage-fake"，生产模式会被忽略
+        when(bailian.chat(anyString(), anyString(), anyString()))
+                .thenReturn(VALID_REPORT.replace("\"source\":[\"PlantVillage\"]",
+                        "\"source\":[\"fake-dataset\"]").replace("\"target\":[\"跨地区田间采集\"]",
+                        "\"target\":[\"fake-target\"]"));
+        ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper(), false);
+
+        ResearchPlan plan = agent.generate(context());
+
+        // 生产锁定：source 取⑥产物（含 "PlantVillage"），忽略 dto 的 "fake-dataset"；target 来自⑤引用
+        assertTrue(plan.datasets().source().contains("PlantVillage"));
+        assertTrue(plan.datasets().source().stream().noneMatch(
+                item -> item.contains("fake-dataset")), "生产模式不应使用 LLM 编造的数据集名");
     }
 
     // ==================== 工具：构造含 ①-⑦ 产物的 ctx ====================
