@@ -1,5 +1,6 @@
 package com.aiscientist.ai.pipeline;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -69,6 +70,7 @@ public class PipelineEngine {
      * @param agents         全部已接入的 Agent
      * @param eventPublisher SSE 事件发布器
      */
+    @Autowired
     public PipelineEngine(List<PipelineAgent> agents, EventPublisher eventPublisher) {
         this.agentsByStage = agents.stream()
                 .collect(Collectors.groupingBy(PipelineAgent::stage));

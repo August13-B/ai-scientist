@@ -1,5 +1,7 @@
 package com.aiscientist.ai.verify;
 
+import org.springframework.stereotype.Component;
+
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
@@ -17,6 +19,7 @@ import java.util.regex.Pattern;
  *
  * <p>网络失败（超时/限流/接口异常）判 UNVERIFIABLE，不冤枉真实论文。</p>
  */
+@Component
 public final class CitationVerifier {
 
     private static final Pattern DOI = Pattern.compile("10\\.\\d{4,9}/[-._;()/:a-zA-Z0-9]+");
