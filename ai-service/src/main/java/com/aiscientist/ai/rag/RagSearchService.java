@@ -40,9 +40,10 @@ import java.util.Map;
 public class RagSearchService {
 
     private static final String EMBEDDING_MODEL = "text-embedding-v4";
-    /** Chroma v2 端点：多租户/数据库结构（默认 default_tenant/default_database） */
-    private static final String QUERY_PATH =
-            "/api/v2/tenants/default_tenant/databases/default_database/collections/%s/query";
+    /** Chroma v2 端点：多租户/数据库结构（默认 default_tenant/default_database），路径段用 collection id(UUID) */
+    private static final String COLLECTIONS_PATH =
+            "/api/v2/tenants/default_tenant/databases/default_database/collections";
+    private static final String QUERY_PATH = COLLECTIONS_PATH + "/%s/query";
 
     /** 本地调试样例论文（水稻病害检测方向，DOI 均经 Crossref 实测 HTTP 200） */
     private static final List<PaperEvidence> MOCK_SAMPLES = List.of(
@@ -128,6 +129,8 @@ public class RagSearchService {
     // ==================== 内部实现 ====================
 
     private List<PaperEvidence> queryChroma(String collection, List<Double> queryVector, int topK) {
+        // Chroma v2：query 路径用 collection 的 id(UUID)，先按名字解析出 id
+        String collectionId = resolveCollectionId(collection);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("query_embeddings", List.of(queryVector));
         body.put("n_results", topK);
@@ -135,7 +138,7 @@ public class RagSearchService {
         try {
             String requestJson = objectMapper.writeValueAsString(body);
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(chromaBaseUrl + String.format(QUERY_PATH, collection)))
+                    .uri(URI.create(chromaBaseUrl + String.format(QUERY_PATH, collectionId)))
                     .timeout(timeout)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestJson))
@@ -151,6 +154,40 @@ public class RagSearchService {
             throw exception;
         } catch (Exception exception) {
             throw new IllegalStateException("Chroma 检索失败：" + exception.getMessage(), exception);
+        }
+    }
+
+    /**
+     * 按 collection 名字解析其 id(UUID)。
+     * Chroma v2 的 query 路径段要求 collection 的 id 而非 name。
+     * GET /api/v2/tenants/{t}/databases/{d}/collections 返回 [{id,name,...}]。
+     */
+    String resolveCollectionId(String name) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(chromaBaseUrl + COLLECTIONS_PATH))
+                    .timeout(timeout)
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(
+                    request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new IllegalStateException("Chroma 列出集合失败 HTTP " + response.statusCode());
+            }
+            JsonNode collections = objectMapper.readTree(response.body());
+            if (!collections.isArray()) {
+                throw new IllegalStateException("Chroma 集合列表响应不是数组");
+            }
+            for (JsonNode item : collections) {
+                if (name.equals(item.path("name").asText())) {
+                    return item.path("id").asText();
+                }
+            }
+            throw new IllegalStateException("Chroma 未找到集合：" + name + "（请先导入四库向量）");
+        } catch (IllegalStateException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IllegalStateException("Chroma 解析集合 id 失败：" + exception.getMessage(), exception);
         }
     }
 
