@@ -214,10 +214,14 @@ public class PipelineEngine {
         List<PipelineAgent> agents = agentsByStage.getOrDefault(stage, List.of());
         PipelineContext ctx = runtime.ctx;
         for (PipelineAgent agent : agents) {
-            eventPublisher.publish(runId, "agent.start",
-                    Map.of("stage", stage.name(), "agent", agent.getClass().getSimpleName()));
             // 执行前按阶段契约取输入快照（agent 只读输入、写自己输出字段，前后一致）
             Map<String, Object> input = stageInputs(ctx, stage);
+            // agent.start 事件携带 input，供前端 SSE 实时展示键入输入
+            java.util.Map<String, Object> startEvent = new java.util.LinkedHashMap<>();
+            startEvent.put("stage", stage.name());
+            startEvent.put("agent", agent.getClass().getSimpleName());
+            startEvent.put("input", input);
+            eventPublisher.publish(runId, "agent.start", startEvent);
             long startMillis = System.currentTimeMillis();
             try {
                 agent.execute(ctx);
