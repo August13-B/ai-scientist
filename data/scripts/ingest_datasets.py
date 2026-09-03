@@ -34,8 +34,12 @@ class DatasetsIngester(BaseIngester):
         annotation = record.get("annotation") or ""
         url = record.get("url")
 
+        if not url:
+            raise ValueError(f"数据集 [{name}] 缺少 url 来源标识")
+
         metadata = {
-            "source_id": normalize_source(doi=record.get("doi"), pmid=record.get("pmid"), url=url),
+            "source_id": f"url:{url.strip()}",
+            "title": name,       # 检索侧 PaperEvidence 需要（docs/rag-field-standard.md §5）
             "name": name,
             "features": features,
             "samples": samples,

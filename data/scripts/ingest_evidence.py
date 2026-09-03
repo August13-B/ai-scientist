@@ -38,6 +38,7 @@ class EvidenceIngester(BaseIngester):
         )
         metadata = {
             "source_id": source_id,
+            "title": f"{subject} {predicate} {obj}".strip(),  # 检索侧 PaperEvidence 需要（docs/rag-field-standard.md §5）
             "subject": subject,
             "predicate": predicate,
             "object": obj,

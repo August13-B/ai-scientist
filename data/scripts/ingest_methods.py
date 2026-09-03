@@ -38,6 +38,7 @@ class MethodsIngester(BaseIngester):
         )
         metadata = {
             "source_id": source_id,
+            "title": name,       # 检索侧 PaperEvidence 需要（docs/rag-field-standard.md §5）
             "method_name": name,
             "scenario": scenario,
             "evaluation": evaluation,
