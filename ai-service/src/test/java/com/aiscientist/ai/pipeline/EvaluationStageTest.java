@@ -30,7 +30,7 @@ class EvaluationStageTest {
         // 无 Key 时 BailianClient 抛异常 → 评估阶段回退启发式评分
         when(bailianClient.chat(anyString(), anyString(), anyString()))
                 .thenThrow(new IllegalStateException("缺少 API Key"));
-        stage = new EvaluationStage(verifier, bailianClient);
+        stage = new EvaluationStage(verifier, bailianClient, false);
     }
 
     private PipelineContext ctxWithHypothesis(List<String> evidenceIds) {
@@ -54,7 +54,7 @@ class EvaluationStageTest {
     void unverifiableReferenceShouldFail() {
         ExternalLookup lookup = mock(ExternalLookup.class);
         when(lookup.findByDoi(anyString())).thenReturn(ExternalLookup.Result.error());
-        EvaluationStage s = new EvaluationStage(new CitationVerifier(lookup), bailianClient);
+        EvaluationStage s = new EvaluationStage(new CitationVerifier(lookup), bailianClient, false);
         PipelineContext ctx = ctxWithHypothesis(List.of("doi:10.1038/nature14539"));
         assertThrows(IllegalStateException.class, () -> s.execute(ctx),
                 "无法核验的引用不能自动通过");
@@ -65,7 +65,7 @@ class EvaluationStageTest {
         ExternalLookup lookup = mock(ExternalLookup.class);
         when(lookup.findByDoi("10.1038/nature14539"))
                 .thenReturn(ExternalLookup.Result.found("Deep learning"));
-        EvaluationStage s = new EvaluationStage(new CitationVerifier(lookup), bailianClient);
+        EvaluationStage s = new EvaluationStage(new CitationVerifier(lookup), bailianClient, false);
         PipelineContext ctx = ctxWithHypothesis(List.of("doi:10.1038/nature14539"));
         s.execute(ctx);
         org.junit.jupiter.api.Assertions.assertNotNull(ctx.getEvaluation());

@@ -35,7 +35,7 @@ class HypothesisGenerationAgentTest {
                 paper("压力证据", "睡眠波动与压力相关", "10.1000/evidence")));
         when(bailian.chat(anyString(), anyString(), anyString())).thenReturn(validJson());
         HypothesisGenerationAgent agent = new HypothesisGenerationAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
         HypothesisResult result = agent.generate(
                 "如何提前识别压力风险？", "心理健康", discovery(),
                 List.of(paper("睡眠研究", "睡眠节律研究", "10.1000/paper")));
@@ -57,7 +57,7 @@ class HypothesisGenerationAgentTest {
         when(bailian.chat(anyString(), anyString(), anyString()))
                 .thenReturn(validJson().replace("doi:10.1000/paper", "doi:fake"));
         HypothesisGenerationAgent agent = new HypothesisGenerationAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
         assertThrows(IllegalStateException.class, () -> agent.generate(
                 "问题", "领域", discovery(),
                 List.of(paper("论文", "证据", "10.1000/paper"))));

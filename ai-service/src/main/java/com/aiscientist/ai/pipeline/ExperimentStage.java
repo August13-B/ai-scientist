@@ -40,7 +40,8 @@ public class ExperimentStage implements PipelineAgent {
         List<Evidence> evidence = evaluation.references().stream()
                 .map(this::toEvidence)
                 .toList();
-        if (evidence.isEmpty()) {
+        // 调试模式（临时关 RAG）：允许无核验引用，generator 仍生成实验方案（dataset URL 校验已放宽）
+        if (evidence.isEmpty() && !mockSamples) {
             throw new IllegalStateException("Experiment stage requires verified DOI, PMID, or URL references");
         }
         String domain = ctx.getQuestionQuery() == null ? "general science" : ctx.getQuestionQuery().domain();

@@ -4,6 +4,7 @@ import com.aiscientist.ai.llm.BailianClient;
 import com.aiscientist.ai.rag.RagSearchService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -28,15 +29,19 @@ public class KnowledgeDiscoveryAgent {
     private final BailianClient bailianClient;
     private final RagSearchService ragSearchService;
     private final ObjectMapper objectMapper;
+    /** 调试模式（RAG_MOCK_SAMPLES=true）：放宽来源白名单与覆盖性校验，便于无 RAG/临时关闭时跑通 */
+    private final boolean mockSamples;
 
     public KnowledgeDiscoveryAgent(
             BailianClient bailianClient,
             RagSearchService ragSearchService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            @Value("${vector.mock-samples:false}") boolean mockSamples
     ) {
         this.bailianClient = bailianClient;
         this.ragSearchService = ragSearchService;
         this.objectMapper = objectMapper;
+        this.mockSamples = mockSamples;
     }
 
     public DiscoveryResult discover(DiscoveryRequest request) {
@@ -140,6 +145,10 @@ public class KnowledgeDiscoveryAgent {
             throw new IllegalStateException(
                     "知识发现结果至少包含一个 Research Gap");
         }
+        // 调试模式（临时关 RAG）：放宽来源白名单与 gap 覆盖校验，仅保留非空/基本结构
+        if (mockSamples) {
+            return;
+        }
         requireSources(result.references(), allowedSources);
         result.researchGaps().forEach(gap ->
                 requireSources(gap.evidenceIds(), allowedSources));
@@ -156,6 +165,10 @@ public class KnowledgeDiscoveryAgent {
             EvidenceExtraction extraction,
             Set<String> allowedSources
     ) {
+        // 调试模式（临时关 RAG）：不强制逐篇覆盖输入来源（mock 样例可能不稳定）
+        if (mockSamples) {
+            return;
+        }
         List<String> sources = extraction.papers().stream()
                 .map(KnowledgeDiscoveryModels.PaperAnalysis::sourceId)
                 .toList();

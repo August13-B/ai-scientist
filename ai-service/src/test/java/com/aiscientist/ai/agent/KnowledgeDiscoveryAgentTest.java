@@ -51,7 +51,7 @@ class KnowledgeDiscoveryAgentTest {
         RagSearchService rag = mock(RagSearchService.class);
         stubSuccessfulStages(bailian);
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
         DiscoveryRequest request = new DiscoveryRequest(
                 "如何改进水稻病害识别？",
                 "农业人工智能",
@@ -94,7 +94,7 @@ class KnowledgeDiscoveryAgentTest {
                         "10.1000/b", null, null)
         ));
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
 
         DiscoveryResult result = agent.discover(new DiscoveryRequest(
                 "如何改进水稻病害识别？", "农业人工智能", List.of(), 5));
@@ -108,7 +108,7 @@ class KnowledgeDiscoveryAgentTest {
         RagSearchService rag = mock(RagSearchService.class);
         when(rag.search("papers", "研究问题", 3)).thenReturn(List.of());
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                 () -> agent.discover(new DiscoveryRequest(
@@ -123,7 +123,7 @@ class KnowledgeDiscoveryAgentTest {
         BailianClient bailian = mock(BailianClient.class);
         RagSearchService rag = mock(RagSearchService.class);
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
         DiscoveryRequest request = new DiscoveryRequest(
                 "研究问题", "通用科研",
                 List.of(
@@ -146,7 +146,7 @@ class KnowledgeDiscoveryAgentTest {
         RagSearchService rag = mock(RagSearchService.class);
         when(bailian.chat(anyString(), anyString(), anyString())).thenReturn("{not-json");
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> agent.discover(requestWithEvidence()));
@@ -166,7 +166,7 @@ class KnowledgeDiscoveryAgentTest {
         when(bailian.chat(anyString(), anyString(), anyString()))
                 .thenReturn(incompleteExtraction);
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> agent.discover(requestWithEvidence()));
@@ -184,7 +184,7 @@ class KnowledgeDiscoveryAgentTest {
         when(bailian.chat(anyString(), anyString(), anyString()))
                 .thenReturn(duplicatedExtraction);
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> agent.discover(requestWithEvidence()));
@@ -201,7 +201,7 @@ class KnowledgeDiscoveryAgentTest {
         when(bailian.chat(anyString(), anyString(), anyString()))
                 .thenReturn(EXTRACTION_JSON, COMPARISON_JSON, fabricatedResult);
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> agent.discover(requestWithEvidence()));
@@ -223,7 +223,7 @@ class KnowledgeDiscoveryAgentTest {
         when(bailian.chat(anyString(), anyString(), anyString()))
                 .thenReturn(EXTRACTION_JSON, COMPARISON_JSON, resultWithoutGap);
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> agent.discover(requestWithEvidence()));
@@ -241,7 +241,7 @@ class KnowledgeDiscoveryAgentTest {
         when(bailian.chat(anyString(), anyString(), anyString()))
                 .thenReturn(EXTRACTION_JSON, COMPARISON_JSON, incompleteReferences);
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> agent.discover(requestWithEvidence()));
@@ -260,7 +260,7 @@ class KnowledgeDiscoveryAgentTest {
                         fenced(RESULT_JSON)
                 );
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
 
         DiscoveryResult result = agent.discover(requestWithEvidence());
 

@@ -6,6 +6,7 @@ import com.aiscientist.ai.pipeline.PipelineModels.HypothesisResult;
 import com.aiscientist.ai.rag.RagSearchService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -34,13 +35,17 @@ public class HypothesisGenerationAgent {
     private final BailianClient bailianClient;
     private final RagSearchService ragSearchService;
     private final ObjectMapper objectMapper;
+    /** 调试模式（RAG_MOCK_SAMPLES=true）：放宽证据白名单校验，便于无 RAG/临时关闭时跑通 */
+    private final boolean mockSamples;
 
     public HypothesisGenerationAgent(BailianClient bailianClient,
                                      RagSearchService ragSearchService,
-                                     ObjectMapper objectMapper) {
+                                     ObjectMapper objectMapper,
+                                     @Value("${vector.mock-samples:false}") boolean mockSamples) {
         this.bailianClient = bailianClient;
         this.ragSearchService = ragSearchService;
         this.objectMapper = objectMapper;
+        this.mockSamples = mockSamples;
     }
 
     public HypothesisResult generate(String question, String domain,
@@ -104,7 +109,7 @@ public class HypothesisGenerationAgent {
                     || item.reasoningChain().isEmpty() || item.evidenceIds().isEmpty()) {
                 throw new IllegalStateException("每个候选假设必须包含技术、方法、推理链和证据");
             }
-            if (!allowed.containsAll(item.evidenceIds())) {
+            if (!mockSamples && !allowed.containsAll(item.evidenceIds())) {
                 throw new IllegalStateException("候选假设引用了未提供的证据来源");
             }
         }
