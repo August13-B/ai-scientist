@@ -90,6 +90,28 @@ class RagSearchServiceTest {
     }
 
     private static RagSearchService service(String vectorDb) {
-        return new RagSearchService(vectorDb, "localhost", 8000, 60, mock(BailianClient.class));
+        return new RagSearchService(vectorDb, "localhost", 8000, 60, false, mock(BailianClient.class));
+    }
+
+    @Test
+    void mockModeReturnsBuiltinSamplesWithoutVectorDb() {
+        // 本地调试：RAG_MOCK_SAMPLES=true 时不连 Chroma，直接返回内置样例论文
+        RagSearchService mockService = new RagSearchService(
+                "chroma", "localhost", 8000, 60, true, mock(BailianClient.class));
+
+        List<PaperEvidence> papers = mockService.search("papers", "任何问题", 3);
+
+        assertEquals(3, papers.size());
+        assertEquals("doi:10.21275/sr231218142714", papers.get(0).sourceId());
+        assertTrue(papers.stream().allMatch(paper -> paper.doi() != null));
+    }
+
+    @Test
+    void mockModeHonorsTopKAndNeverReturnsMoreThanSamples() {
+        RagSearchService mockService = new RagSearchService(
+                "chroma", "localhost", 8000, 60, true, mock(BailianClient.class));
+
+        assertEquals(4, mockService.search("evidence", "问题", 99).size());
+        assertEquals(1, mockService.search("methods", "问题", 1).size());
     }
 }
