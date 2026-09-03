@@ -6,7 +6,7 @@
 本项目面向科研场景，基于**千问（Qwen）开源大模型**与**阿里云百炼平台**，构建一个具备「文献/数据输入 → 可验证科学假设输出」能力的多智能体系统原型（AI Scientist），实现科研灵感流水线的自动化与智能化。
 
 - 基座模型：Qwen-Max / Qwen-Plus / Qwen-Turbo（通过阿里云百炼平台调用）
-- 系统形态：多智能体系统（Multi-Agent System），七 Agent DAG 管线 + 人在回路（Human-in-the-Loop）
+- 系统形态：多智能体系统（Multi-Agent System），八 Agent DAG 管线 + 人在回路（Human-in-the-Loop）
 - 研究方向：暂定「深度学习 × 固态硬盘（SSD）存储」（待团队最终确认）
 
 ---
@@ -35,7 +35,7 @@
                            │ 内部 HTTP
 ┌──────────────────────────▼─────────────────────────────────┐
 │  多智能体服务层  Spring Boot + LangChain4j（ai-service/）    │
-│  七 Agent DAG 管线 · @Tool/@AiService · State 状态流转       │
+│  八 Agent DAG 管线 · @Tool/@AiService · State 状态流转       │
 │  ①问题理解→②文献检索→③知识发现→④假设生成→⑤评估→⑥实验设计→⑦辩论│
 └──────────────────────────┬─────────────────────────────────┘
                            │
@@ -68,7 +68,7 @@
 .
 ├── frontend/          # 前端工程（Vue3 + Vite + TS + Vue Flow）
 ├── backend/           # 业务后端（Spring Boot：REST API / SSE / MySQL）
-├── ai-service/        # 多智能体服务（LangChain4j：七 Agent 管线 / 四库检索 / 百炼调用）
+├── ai-service/        # 多智能体服务（LangChain4j：八 Agent 管线 / 四库检索 / 百炼调用）
 ├── data/              # 数据处理（Python 脚本：PDF 解析 / 清洗 / 灌库）
 ├── docs/              # 项目文档（架构 / Agent / RAG / 技术方案 / 接口 / 规范）
 ├── docker-compose.yml # 中间件编排（MySQL / Milvus / Chroma）
@@ -121,7 +121,7 @@ npm run dev
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | 系统架构设计（四层 + 通信链路） |
 | [docs/git-guide.md](docs/git-guide.md) | Git & GitHub 协作操作规范（零基础新手向，必读） |
-| [docs/agents.md](docs/agents.md) | 七 Agent 管线设计（DAG 状态流转 / 数据流 / 输出字段） |
+| [docs/agents.md](docs/agents.md) | 八 Agent 管线设计（DAG 状态流转 / 数据流 / 输出字段） |
 | [docs/rag.md](docs/rag.md) | 四库 RAG 设计（论文/方法/数据/证据库） |
 | [docs/rag-field-standard.md](docs/rag-field-standard.md) | **四库灌库字段标准**（JSONL/metadata/title/source_id 契约 + 校验脚本） |
 | [docs/tech-plan.md](docs/tech-plan.md) | 赛题技术方案（对标提交 PDF） |

@@ -8,6 +8,7 @@ import com.aiscientist.ai.pipeline.PipelineModels.QuestionQuery;
 import com.aiscientist.ai.rag.RagSearchService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -90,15 +91,19 @@ public class LiteratureRetrievalAgent {
     private final BailianClient bailianClient;
     private final RagSearchService ragSearchService;
     private final ObjectMapper objectMapper;
+    /** 调试模式（RAG_MOCK_SAMPLES=true）：放宽覆盖性校验（LLM 偶发漏篇不打回），生产模式保持严格 */
+    private final boolean mockSamples;
 
     public LiteratureRetrievalAgent(
             BailianClient bailianClient,
             RagSearchService ragSearchService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            @Value("${vector.mock-samples:false}") boolean mockSamples
     ) {
         this.bailianClient = bailianClient;
         this.ragSearchService = ragSearchService;
         this.objectMapper = objectMapper;
+        this.mockSamples = mockSamples;
     }
 
     /**
@@ -225,7 +230,10 @@ public class LiteratureRetrievalAgent {
         Set<String> allowed = papers.stream()
                 .map(PaperEvidence::sourceId)
                 .collect(Collectors.toUnmodifiableSet());
-        requireCoverage(papers, keyFindings);
+        // 调试模式放宽覆盖校验（LLM 偶发漏篇不打回）；白名单校验始终保留（防虚构）
+        if (!mockSamples) {
+            requireCoverage(papers, keyFindings);
+        }
         for (KeyFinding finding : keyFindings) {
             if (isBlank(finding.finding())) {
                 throw new IllegalStateException("文献检索结果包含空白关键发现");

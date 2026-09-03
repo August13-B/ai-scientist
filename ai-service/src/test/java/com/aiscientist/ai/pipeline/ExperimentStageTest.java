@@ -27,7 +27,7 @@ class ExperimentStageTest {
                 List.of("data leakage", "small sample", "domain shift")));
         PipelineContext context = contextWithEvaluation();
 
-        new ExperimentStage(generator).execute(context);
+        new ExperimentStage(generator, false).execute(context);
 
         verify(generator).generate(any(), any());
         assertThat(context.getExperiment().baselines()).containsExactly(
@@ -45,7 +45,7 @@ class ExperimentStageTest {
         context.setEvaluation(new PipelineModels.EvaluationResult(
                 context.getEvaluation().rankings(), List.of(), List.of("evidence-1")));
 
-        assertThatThrownBy(() -> new ExperimentStage(generator).execute(context))
+        assertThatThrownBy(() -> new ExperimentStage(generator, false).execute(context))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Untraceable");
     }
@@ -57,9 +57,25 @@ class ExperimentStageTest {
                 List.of("a"), List.of("m"), List.of("untraceable dataset"), List.of("p"),
                 List.of("predicted range 5%-10%"), List.of("risk")));
 
-        assertThatThrownBy(() -> new ExperimentStage(generator).execute(contextWithEvaluation()))
+        assertThatThrownBy(() -> new ExperimentStage(generator, false).execute(contextWithEvaluation()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("traceable URL");
+    }
+
+    @Test
+    void mockModeAllowsDatasetWithoutUrl() {
+        // 调试模式（RAG_MOCK_SAMPLES=true）：允许「数据集选择标准」描述（无 URL），便于无 RAG 时跑通
+        ExperimentPlanGenerator generator = mock(ExperimentPlanGenerator.class);
+        when(generator.generate(any(), any())).thenReturn(new GeneratedExperimentContent(
+                List.of("a", "b", "c"), List.of("m1", "m2", "m3", "m4", "m5"),
+                List.of("包含作物病害图像的数据集，要求公开可获取且含健康与病害样本"), List.of("p"),
+                List.of("predicted range 5%-10%"), List.of("risk")));
+
+        PipelineContext mockCtx = contextWithEvaluation();
+        new ExperimentStage(generator, true).execute(mockCtx);
+
+        assertThat(mockCtx.getExperiment().datasets())
+                .contains("包含作物病害图像的数据集，要求公开可获取且含健康与病害样本");
     }
 
     @Test
@@ -69,7 +85,7 @@ class ExperimentStageTest {
                 List.of("a"), List.of("m"), List.of("Dataset (https://example.org/data)"), List.of("p"),
                 List.of("RAG reduces unsupported answers"), List.of("risk")));
 
-        assertThatThrownBy(() -> new ExperimentStage(generator).execute(contextWithEvaluation()))
+        assertThatThrownBy(() -> new ExperimentStage(generator, false).execute(contextWithEvaluation()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("not a copy");
     }

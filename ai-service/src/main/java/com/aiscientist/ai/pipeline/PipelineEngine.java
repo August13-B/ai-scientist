@@ -3,12 +3,14 @@ package com.aiscientist.ai.pipeline;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -129,6 +131,26 @@ public class PipelineEngine {
         return requireRuntime(runId).ctx;
     }
 
+    /** 获取 runId 的 Agent 级执行追踪（input/output/耗时/状态） */
+    public List<AgentTraceRecord> trace(String runId) {
+        return List.copyOf(requireRuntime(runId).trace);
+    }
+
+    /** 运行信息（调试列表用） */
+    public record RunInfo(String runId, String question, boolean done) {
+    }
+
+    /** 全部已启动的 run（进行中/已暂停/已完成），按启动顺序 */
+    public List<RunInfo> runs() {
+        return runtimes.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> new RunInfo(
+                        entry.getKey(),
+                        entry.getValue().ctx.getQuestion(),
+                        entry.getValue().ctx.getFinalReport() != null))
+                .toList();
+    }
+
     /** 获取 runId 的完成信号（供调用方等待管线结束） */
     public CompletableFuture<Void> completion(String runId) {
         return requireRuntime(runId).future;
@@ -148,15 +170,18 @@ public class PipelineEngine {
         // 同步模式（run()）runId 为空，事件负载统一用 "sync" 兜底（Map.of 不允许 null）
         String runId = runtime.runId == null ? "sync" : runtime.runId;
         try {
-            executeStage(AgentStage.UNDERSTANDING, ctx, runId);
-            executeParallel(PARALLEL_STAGES, ctx, runId);
-            executeStage(AgentStage.HYPOTHESIS, ctx, runId);
+            executeStage(runtime, AgentStage.UNDERSTANDING, runId);
+            executeParallel(runtime, PARALLEL_STAGES, runId);
+            executeStage(runtime, AgentStage.HYPOTHESIS, runId);
             pauseForHuman(runtime, runId);
-            executeStage(AgentStage.EVALUATION, ctx, runId);
-            executeStage(AgentStage.EXPERIMENT, ctx, runId);
-            executeStage(AgentStage.DEBATE, ctx, runId);
-
-            ctx.setFinalReport(ResearchPlanAssembler.assemble(ctx));
+            executeStage(runtime, AgentStage.EVALUATION, runId);
+            executeStage(runtime, AgentStage.EXPERIMENT, runId);
+            executeStage(runtime, AgentStage.DEBATE, runId);
+            // ⑧ 报告生成：ReportStage 内已回退 assembler，保底产出
+            executeStage(runtime, AgentStage.REPORT, runId);
+            if (ctx.getFinalReport() == null) {
+                ctx.setFinalReport(ResearchPlanAssembler.assemble(ctx));
+            }
             eventPublisher.publish(runId, "pipeline.done",
                     Map.of("runId", runId, "report", ctx.getFinalReport()));
         } catch (Exception exception) {
@@ -184,15 +209,37 @@ public class PipelineEngine {
         }
     }
 
-    /** 串行执行单个阶段（可含多个同阶段 Agent），逐 Agent 发布事件 */
-    private void executeStage(AgentStage stage, PipelineContext ctx, String runId) {
+    /** 串行执行单个阶段（可含多个同阶段 Agent），逐 Agent 发布事件并记录 trace */
+    private void executeStage(PipelineRuntime runtime, AgentStage stage, String runId) {
         List<PipelineAgent> agents = agentsByStage.getOrDefault(stage, List.of());
+        PipelineContext ctx = runtime.ctx;
         for (PipelineAgent agent : agents) {
             eventPublisher.publish(runId, "agent.start",
                     Map.of("stage", stage.name(), "agent", agent.getClass().getSimpleName()));
+            // 执行前按阶段契约取输入快照（agent 只读输入、写自己输出字段，前后一致）
+            Map<String, Object> input = stageInputs(ctx, stage);
+            long startMillis = System.currentTimeMillis();
             try {
                 agent.execute(ctx);
+                runtime.trace.add(new AgentTraceRecord(
+                        stage.name(),
+                        agent.getClass().getSimpleName(),
+                        startMillis,
+                        System.currentTimeMillis() - startMillis,
+                        "SUCCESS",
+                        null,
+                        input,
+                        stageOutput(ctx, stage)));
             } catch (Exception exception) {
+                runtime.trace.add(new AgentTraceRecord(
+                        stage.name(),
+                        agent.getClass().getSimpleName(),
+                        startMillis,
+                        System.currentTimeMillis() - startMillis,
+                        "FAILED",
+                        String.valueOf(exception.getMessage()),
+                        input,
+                        null));
                 throw new IllegalStateException(
                         "阶段 " + stage + " 执行失败：" + agent.getClass().getSimpleName(),
                         exception);
@@ -207,10 +254,10 @@ public class PipelineEngine {
     }
 
     /** 并行执行多个阶段（②③），全部完成后聚合 */
-    private void executeParallel(List<AgentStage> stages, PipelineContext ctx, String runId) {
+    private void executeParallel(PipelineRuntime runtime, List<AgentStage> stages, String runId) {
         List<CompletableFuture<Void>> futures = stages.stream()
                 .map(stage -> CompletableFuture.runAsync(
-                        () -> executeStage(stage, ctx, runId), parallelPool))
+                        () -> executeStage(runtime, stage, runId), parallelPool))
                 .toList();
         try {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
@@ -233,7 +280,58 @@ public class PipelineEngine {
             case EVALUATION -> ctx.getEvaluation();
             case EXPERIMENT -> ctx.getExperiment();
             case DEBATE -> ctx.getDebate();
+            case REPORT -> ctx.getFinalReport();
         };
+    }
+
+    /**
+     * 按 AgentStage 数据契约取输入字段快照（对应 docs/agents.md 与 AGENTS.md 契约表）：
+     * ① question；② questionQuery+question；③ question+questionQuery（自足 RAG）；
+     * ④ knowledgeDiscovery+literature；⑤ hypothesis+humanFeedback；⑥ evaluation；⑦ evaluation+experiment。
+     */
+    private Map<String, Object> stageInputs(PipelineContext ctx, AgentStage stage) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        switch (stage) {
+            case UNDERSTANDING -> putIfPresent(input, "question", ctx.getQuestion());
+            case LITERATURE -> {
+                putIfPresent(input, "question", ctx.getQuestion());
+                putIfPresent(input, "questionQuery", ctx.getQuestionQuery());
+            }
+            case KNOWLEDGE -> {
+                putIfPresent(input, "question", ctx.getQuestion());
+                putIfPresent(input, "questionQuery", ctx.getQuestionQuery());
+            }
+            case HYPOTHESIS -> {
+                putIfPresent(input, "knowledgeDiscovery", ctx.getKnowledgeDiscovery());
+                putIfPresent(input, "literature", ctx.getLiterature());
+            }
+            case EVALUATION -> {
+                putIfPresent(input, "hypothesis", ctx.getHypothesis());
+                putIfPresent(input, "humanFeedback", ctx.getHumanFeedback());
+            }
+            case EXPERIMENT -> putIfPresent(input, "evaluation", ctx.getEvaluation());
+            case DEBATE -> {
+                putIfPresent(input, "evaluation", ctx.getEvaluation());
+                putIfPresent(input, "experiment", ctx.getExperiment());
+            }
+            case REPORT -> {
+                putIfPresent(input, "question", ctx.getQuestion());
+                putIfPresent(input, "questionQuery", ctx.getQuestionQuery());
+                putIfPresent(input, "literature", ctx.getLiterature());
+                putIfPresent(input, "knowledgeDiscovery", ctx.getKnowledgeDiscovery());
+                putIfPresent(input, "hypothesis", ctx.getHypothesis());
+                putIfPresent(input, "evaluation", ctx.getEvaluation());
+                putIfPresent(input, "experiment", ctx.getExperiment());
+                putIfPresent(input, "debate", ctx.getDebate());
+            }
+        }
+        return input;
+    }
+
+    private void putIfPresent(Map<String, Object> input, String key, Object value) {
+        if (value != null) {
+            input.put(key, value);
+        }
     }
 
     private PipelineRuntime requireRuntime(String runId) {
@@ -260,13 +358,14 @@ public class PipelineEngine {
         return Executors.newFixedThreadPool(size, factory);
     }
 
-    /** 单任务运行态：ctx + 暂停闩 + 完成信号 */
+    /** 单任务运行态：ctx + 暂停闩 + 完成信号 + 执行追踪 */
     private static final class PipelineRuntime {
 
         private final String runId;
         private final PipelineContext ctx;
         private final boolean awaitHuman;
         private final CountDownLatch humanLatch = new CountDownLatch(1);
+        private final List<AgentTraceRecord> trace = new CopyOnWriteArrayList<>();
         private volatile CompletableFuture<Void> future;
 
         private PipelineRuntime(String runId, PipelineContext ctx, boolean awaitHuman) {

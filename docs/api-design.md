@@ -52,3 +52,32 @@
 - 文件上传格式与大小限制（PDF、CSV）
 - 接口鉴权（赛期可先内网直连，后续补充 Token）
 - OpenAPI/Swagger 文档自动生成
+
+## 4. Agent 执行追踪（trace 规范，2026-09-02）
+
+> 状态：✅ 已实现（ai-service，调试可视化用；前端 Vue Flow 可消费同一 JSON）
+
+| 端点 | 用途 | 说明 |
+|---|---|---|
+| GET `/pipeline/runs` | 已启动 run 列表 | `[{runId, question, done}]` |
+| GET `/pipeline/{runId}/trace` | Agent 级执行追踪 JSON | 全量 input/output |
+| GET `/pipeline/{runId}/debug` | 内嵌 HTML 调试页 | 轮询渲染 Agent 卡片（绿红状态/耗时/输入输出折叠），不依赖前端 |
+
+**trace 元素结构**（`AgentTraceRecord`，每次 Agent 执行一条）：
+
+```json
+{
+  "stage": "HYPOTHESIS",          // AgentStage.name()
+  "agent": "HypothesisGenerationStage",
+  "startTimeMillis": 1756800000000,
+  "durationMillis": 8420,          // 执行耗时
+  "status": "SUCCESS",             // SUCCESS | FAILED
+  "errorMessage": null,            // FAILED 时的错误消息
+  "input": { "knowledgeDiscovery": {...}, "literature": {...} },  // 按阶段契约的输入字段快照
+  "output": { "hypotheses": [...] }                                // 阶段产物（失败为 null）
+}
+```
+
+**input 契约**（框架按 AgentStage 自动取，Agent 无需感知）：① `question`；② `question+questionQuery`；
+③ `question+questionQuery`（自足 RAG）；④ `knowledgeDiscovery+literature`；⑤ `hypothesis+humanFeedback`；
+⑥ `evaluation`；⑦ `evaluation+experiment`。均为 null 字段省略。

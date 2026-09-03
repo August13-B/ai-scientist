@@ -38,7 +38,8 @@ class PipelineEngineTest {
                 agent(AgentStage.HYPOTHESIS, ctx -> order.add("hypothesis")),
                 agent(AgentStage.EVALUATION, ctx -> order.add("evaluation")),
                 agent(AgentStage.EXPERIMENT, ctx -> order.add("experiment")),
-                agent(AgentStage.DEBATE, ctx -> order.add("debate"))
+                agent(AgentStage.DEBATE, ctx -> order.add("debate")),
+                agent(AgentStage.REPORT, ctx -> order.add("report"))
         ));
 
         PipelineContext ctx = engine.run("  如何提升水稻病害模型泛化能力？  ");
@@ -49,7 +50,7 @@ class PipelineEngineTest {
         assertNotNull(ctx.getFinalReport());
         // 七阶段全部执行
         for (String name : List.of("understanding", "literature", "knowledge",
-                "hypothesis", "evaluation", "experiment", "debate")) {
+                "hypothesis", "evaluation", "experiment", "debate", "report")) {
             assertTrue(order.contains(name), "缺少阶段执行记录: " + name);
         }
         // ① 必须最先执行
@@ -63,6 +64,8 @@ class PipelineEngineTest {
         assertTrue(hypothesis < evaluation, "④ 应先于 ⑤");
         assertTrue(evaluation < order.indexOf("experiment"));
         assertTrue(order.indexOf("experiment") < order.indexOf("debate"));
+        // ⑧ REPORT 在 ⑦ 之后
+        assertTrue(order.indexOf("debate") < order.indexOf("report"));
     }
 
     @Test
@@ -111,7 +114,7 @@ class PipelineEngineTest {
 
         PipelineContext ctx = engine.run("研究问题");
 
-        assertEquals(List.of(AgentStage.KNOWLEDGE), ctx.completedStages());
+        assertEquals(List.of(AgentStage.KNOWLEDGE, AgentStage.REPORT), ctx.completedStages());
         assertNotNull(ctx.getFinalReport());
         assertFalse(ctx.getFinalReport().references().isEmpty(),
                 "未接入阶段以占位填充，最终报告仍可组装");
@@ -225,6 +228,90 @@ class PipelineEngineTest {
                 () -> engine.completion(runId).get(5, TimeUnit.SECONDS));
         assertTrue(publisher.events().stream().anyMatch(
                 event -> event.eventType().equals("pipeline.error")));
+    }
+
+    @Test
+    void asynchronousTraceContainsInputOutputAndFailure() throws Exception {
+        // 异步 trace：成功 Agent 记 SUCCESS+input/output；失败 Agent 记 FAILED+errorMessage
+        TestEventPublisher publisher = new TestEventPublisher();
+        PipelineEngine engine = new PipelineEngine(List.of(
+                agent(AgentStage.UNDERSTANDING, ctx -> ctx.setQuestionQuery(
+                        new PipelineModels.QuestionQuery(
+                                ctx.getQuestion(), "农业人工智能",
+                                List.of("子查询一"), List.of("概念"), List.of(), List.of()))),
+                agent(AgentStage.KNOWLEDGE, ctx -> {
+                    if (ctx.getQuestionQuery() == null) {
+                        throw new IllegalStateException("缺少问题理解输出");
+                    }
+                    ctx.setKnowledgeDiscovery(discoveryResult());
+                })
+        ), publisher);
+
+        String runId = engine.start("研究问题");
+        // ④ 后人在回路暂停：resume 释放后才继续到 done
+        awaitEvent(publisher, "pipeline.pause", 5);
+        engine.resume(runId, new PipelineModels.HumanFeedback("通过", List.of()));
+        engine.completion(runId).get(5, TimeUnit.SECONDS);
+
+        List<AgentTraceRecord> trace = engine.trace(runId);
+        assertEquals(2, trace.size());
+        AgentTraceRecord understanding = trace.get(0);
+        assertEquals("SUCCESS", understanding.status());
+        assertEquals("UNDERSTANDING", understanding.stage());
+        assertTrue(understanding.input().containsKey("question"));
+        assertEquals("研究问题", understanding.input().get("question"));
+        assertNotNull(understanding.output());
+        assertTrue(understanding.durationMillis() >= 0);
+
+        AgentTraceRecord knowledge = trace.get(1);
+        assertEquals("SUCCESS", knowledge.status());
+        assertEquals("KNOWLEDGE", knowledge.stage());
+        assertTrue(knowledge.input().containsKey("questionQuery"));
+        assertNotNull(knowledge.output());
+    }
+
+    @Test
+    void traceRecordsFailedAgentWithErrorMessage() throws Exception {
+        // 失败 Agent：trace 记 FAILED + errorMessage，且 input 快照仍在
+        TestEventPublisher publisher = new TestEventPublisher();
+        PipelineEngine engine = new PipelineEngine(List.of(
+                agent(AgentStage.UNDERSTANDING, ctx -> {
+                    throw new IllegalStateException("模型返回无效 JSON");
+                })
+        ), publisher);
+
+        assertThrows(IllegalStateException.class, () -> engine.run("研究问题"));
+        // 同步 run 的 runtime 未注册；异步 start 场景验证 trace
+        String runId = engine.start("研究问题");
+        assertThrows(java.util.concurrent.ExecutionException.class,
+                () -> engine.completion(runId).get(5, TimeUnit.SECONDS));
+        List<AgentTraceRecord> trace = engine.trace(runId);
+        assertEquals(1, trace.size());
+        assertEquals("FAILED", trace.get(0).status());
+        assertTrue(trace.get(0).errorMessage().contains("模型返回无效 JSON"));
+        assertTrue(trace.get(0).input().containsKey("question"));
+        assertEquals(null, trace.get(0).output());
+    }
+
+    @Test
+    void listsStartedRuns() throws Exception {
+        // runs()：列出已启动 run 与完成状态
+        TestEventPublisher publisher = new TestEventPublisher();
+        PipelineEngine engine = new PipelineEngine(List.of(
+                agent(AgentStage.KNOWLEDGE, ctx -> ctx.setKnowledgeDiscovery(discoveryResult()))
+        ), publisher);
+
+        String runId = engine.start("研究问题");
+        awaitEvent(publisher, "pipeline.pause", 5);
+        engine.resume(runId, new PipelineModels.HumanFeedback("通过", List.of()));
+        engine.completion(runId).get(5, TimeUnit.SECONDS);
+
+        List<PipelineEngine.RunInfo> runs = engine.runs();
+        assertEquals(1, runs.size());
+        assertEquals(runId, runs.get(0).runId());
+        assertEquals("研究问题", runs.get(0).question());
+        assertTrue(runs.get(0).done());
+        assertThrows(IllegalArgumentException.class, () -> engine.trace("unknown"));
     }
 
     // ==================== 测试工具 ====================
