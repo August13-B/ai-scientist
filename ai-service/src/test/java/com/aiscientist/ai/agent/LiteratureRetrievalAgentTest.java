@@ -45,7 +45,7 @@ class LiteratureRetrievalAgentTest {
         stubSearch(rag, "小样本识别方法", List.of(p("p3"), p("p4")));
         when(bailian.chat(anyString(), anyString(), anyString())).thenReturn(singlePassJson());
         LiteratureRetrievalAgent agent = new LiteratureRetrievalAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
 
         LiteratureResult result = agent.retrieve(QUERY);
 
@@ -66,7 +66,7 @@ class LiteratureRetrievalAgentTest {
         stubSearch(rag, "跨地区病害图像差异分析", List.of(p("p1")));
         stubSearch(rag, "小样本识别方法", List.of(p("p1"))); // 同一来源重复
         LiteratureRetrievalAgent agent = new LiteratureRetrievalAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> agent.retrieve(QUERY));
@@ -84,7 +84,7 @@ class LiteratureRetrievalAgentTest {
         when(rag.search(eq("evidence"), eq(Q), eq(5))).thenReturn(List.of(p("p4")));
         when(bailian.chat(anyString(), anyString(), anyString())).thenReturn(singlePassJson());
         LiteratureRetrievalAgent agent = new LiteratureRetrievalAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
         QuestionQuery fallback = new QuestionQuery(Q, "通用科研", List.of(), List.of(), List.of(), List.of());
 
         LiteratureResult result = agent.retrieve(fallback);
@@ -110,7 +110,7 @@ class LiteratureRetrievalAgentTest {
                         findingsJson("p6", "p7", "p8", "p9"),
                         chainsJson("p1", "p3", "p6"));
         LiteratureRetrievalAgent agent = new LiteratureRetrievalAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
         QuestionQuery single = new QuestionQuery(Q, "农业人工智能",
                 List.of(Q), List.of(), List.of(), List.of());
 
@@ -138,7 +138,7 @@ class LiteratureRetrievalAgentTest {
                         findingsJson("k1", "k2", "k3", "k4", "k5"),
                         chainsJson("a0", "k5"));
         LiteratureRetrievalAgent agent = new LiteratureRetrievalAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
         QuestionQuery single = new QuestionQuery(Q, "通用科研",
                 List.of(Q), List.of(), List.of(), List.of());
 
@@ -164,7 +164,7 @@ class LiteratureRetrievalAgentTest {
                 "{\"chain\":\"两方向文献共同指向泛化瓶颈\",\"evidenceIds\":[\"doi:10.1000/fake\"]}");
         when(bailian.chat(anyString(), anyString(), anyString())).thenReturn(json);
         LiteratureRetrievalAgent agent = new LiteratureRetrievalAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> agent.retrieve(QUERY));
@@ -187,7 +187,7 @@ class LiteratureRetrievalAgentTest {
                 """;
         when(bailian.chat(anyString(), anyString(), anyString())).thenReturn(json);
         LiteratureRetrievalAgent agent = new LiteratureRetrievalAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> agent.retrieve(QUERY));
@@ -203,7 +203,7 @@ class LiteratureRetrievalAgentTest {
         stubSearch(rag, "小样本识别方法", List.of(p("p3"), p("p4")));
         when(bailian.chat(anyString(), anyString(), anyString())).thenReturn("{not-json");
         LiteratureRetrievalAgent agent = new LiteratureRetrievalAgent(
-                bailian, rag, new ObjectMapper());
+                bailian, rag, new ObjectMapper(), false);
 
         assertThrows(IllegalStateException.class, () -> agent.retrieve(QUERY));
     }
@@ -212,7 +212,7 @@ class LiteratureRetrievalAgentTest {
     void rejectsNullQuestionQuery() {
         BailianClient bailian = mock(BailianClient.class);
         LiteratureRetrievalAgent agent = new LiteratureRetrievalAgent(
-                bailian, mock(RagSearchService.class), new ObjectMapper());
+                bailian, mock(RagSearchService.class), new ObjectMapper(), false);
 
         assertThrows(IllegalArgumentException.class, () -> agent.retrieve(null));
     }

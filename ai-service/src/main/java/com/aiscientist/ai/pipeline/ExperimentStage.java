@@ -5,19 +5,25 @@ import com.aiscientist.ai.wangwanying.evidence.EvidenceModality;
 import com.aiscientist.ai.wangwanying.experiment.ExperimentPlanGenerator;
 import com.aiscientist.ai.wangwanying.experiment.ExperimentRequest;
 import com.aiscientist.ai.wangwanying.experiment.GeneratedExperimentContent;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Comparator;
 import java.util.List;
 
-/** Connects the real experiment generator to the shared pipeline contract. */
+/** ⑥ 实验设计阶段接入适配器（王婉莹负责）。 */
 @Component
 public class ExperimentStage implements PipelineAgent {
 
     private final ExperimentPlanGenerator generator;
+    /** 调试模式（RAG_MOCK_SAMPLES=true）：放宽 dataset URL 校验，允许「数据集选择标准」描述，便于无 RAG/数据时跑通全链路 */
+    private final boolean mockSamples;
 
-    public ExperimentStage(ExperimentPlanGenerator generator) {
+    public ExperimentStage(
+            ExperimentPlanGenerator generator,
+            @Value("${vector.mock-samples:false}") boolean mockSamples) {
         this.generator = generator;
+        this.mockSamples = mockSamples;
     }
 
     @Override
@@ -56,8 +62,13 @@ public class ExperimentStage implements PipelineAgent {
             throw new IllegalStateException("Experiment datasets must not be empty");
         }
         for (String dataset : generated.datasets()) {
-            if (dataset == null || dataset.isBlank()
-                    || !(dataset.contains("https://") || dataset.contains("http://"))) {
+            if (dataset == null || dataset.isBlank()) {
+                throw new IllegalStateException(
+                        "Each experiment dataset must include a name: " + dataset);
+            }
+            // 生产：具体数据集必须可溯源 URL（符合引用可溯源红线）；
+            // 调试模式：允许「数据集选择标准」描述（与 BailianExperimentPlanGenerator 提示词第 2 条一致）
+            if (!mockSamples && !(dataset.contains("https://") || dataset.contains("http://"))) {
                 throw new IllegalStateException(
                         "Each experiment dataset must include a name and traceable URL: " + dataset);
             }
