@@ -8,6 +8,7 @@
 """
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -15,7 +16,8 @@ from pathlib import Path
 
 # 允许从 data/scripts 直接运行
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from rag_common import get_vector_client, embed_texts  # noqa: E402
+from chunking import split_text  # noqa: E402
+from rag_common import embed_texts, get_vector_client, sanitize_metadata  # noqa: E402
 
 
 class BaseIngester:
@@ -29,10 +31,33 @@ class BaseIngester:
     def parse_record(self, record: dict) -> list[dict]:
         """
         子类实现：把一条 JSONL 记录拆成「可向量化的文本块 + 元数据」。
-        返回 [{"text": "...", "metadata": {..., "source_id": "doi:xxx"}}]
-        每条必须带 source_id（来源标识，支撑幻觉检测）。
+        返回统一 chunk payload：{"id": "...", "text": "...", "metadata": {...}}。
+        metadata 每条必须带 source_id（来源标识，支撑幻觉检测）。
         """
         raise NotImplementedError
+
+    def create_chunk_payloads(self, text: str, metadata: dict) -> list[dict]:
+        """生成四库统一的、包含稳定 ID 与位置元数据的 chunk 契约。"""
+        source_id = metadata.get("source_id")
+        if not source_id:
+            raise ValueError("chunk metadata 必须包含 source_id")
+        parts = split_text(text, self.CHUNK_SIZE, self.CHUNK_OVERLAP)
+        total = len(parts)
+        collection = getattr(self, "_active_collection", self.COLLECTION_NAME)
+        payloads = []
+        for index, part in enumerate(parts):
+            digest = hashlib.sha256(
+                f"{collection}\x1f{source_id}\x1f{index}\x1f{part.text}".encode("utf-8")
+            ).hexdigest()[:32]
+            payload_metadata = sanitize_metadata({
+                **metadata,
+                "chunk_index": index,
+                "chunk_total": total,
+                "chunk_start": part.start,
+                "chunk_end": part.end,
+            })
+            payloads.append({"id": f"{collection}-{digest}", "text": part.text, "metadata": payload_metadata})
+        return payloads
 
     # ==================== 主流程 ====================
 
@@ -42,18 +67,19 @@ class BaseIngester:
             print(f"❌ 无有效记录: {input_path}")
             sys.exit(1)
 
+        collection_name = collection or self.COLLECTION_NAME
+        self._active_collection = collection_name
         chunks = []
         for record in records:
             chunks.extend(self.parse_record(record))
         print(f"  [解析] {len(records)} 条记录 → {len(chunks)} 个分块")
 
         client = get_vector_client()
-        collection_name = collection or self.COLLECTION_NAME
         self._ensure_collection(client, collection_name)
 
         ids, documents, metadatas, embeddings = [], [], [], []
-        for i, chunk in enumerate(chunks):
-            ids.append(f"{collection_name}-{i}")
+        for chunk in chunks:
+            ids.append(chunk["id"])
             documents.append(chunk["text"])
             metadatas.append(chunk["metadata"])
         embeddings = embed_texts(documents)
@@ -84,8 +110,14 @@ class BaseIngester:
             client.insert(
                 collection_name=name,
                 data=[
-                    {"id": i, "vector": emb, "text": doc, **meta}
-                    for i, (doc, meta, emb) in enumerate(zip(documents, metadatas, embeddings))
+                    {
+                        # Milvus 默认主键为整数；从统一 chunk ID 派生以保持重灌稳定。
+                        "id": int(hashlib.sha256(chunk_id.encode("utf-8")).hexdigest()[:15], 16),
+                        "vector": emb,
+                        "text": doc,
+                        **meta,
+                    }
+                    for chunk_id, doc, meta, emb in zip(ids, documents, metadatas, embeddings)
                 ],
             )
         else:
@@ -112,18 +144,6 @@ class BaseIngester:
                 except json.JSONDecodeError as e:
                     print(f"  ⚠️ 跳过坏行: {e}")
         return records
-
-    @staticmethod
-    def split_text(text: str, chunk_size: int, overlap: int) -> list[str]:
-        """RecursiveCharacterTextSplitter 风格分块（chunk_size=512, overlap=64）。"""
-        if len(text) <= chunk_size:
-            return [text]
-        chunks, start = [], 0
-        while start < len(text):
-            chunks.append(text[start : start + chunk_size])
-            start += chunk_size - overlap
-        return chunks
-
 
 def vector_db_type() -> str:
     sys.path.insert(0, str(Path(__file__).resolve().parent))

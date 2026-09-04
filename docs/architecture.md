@@ -23,7 +23,7 @@
                            │ 内部 HTTP（REST + SSE）
 ┌──────────────────────────▼─────────────────────────────────┐
 │  多智能体服务层  ai-service/（Spring Boot + LangChain4j）    │
-│  · 七 Agent DAG 管线（State 状态流转）                      │
+│  · 八 Agent DAG 管线（State 状态流转）                      │
 │  · @Tool / @AiService 定义                                  │
 │  · 百炼平台 Qwen 模型调用封装                               │
 │  · 四库 RAG 检索接口                                        │
@@ -45,7 +45,7 @@
 用户提问
   → 前端 POST /api/tasks（提交科研问题 + 参数）
   → 业务后端创建任务记录，转发至 ai-service POST /pipeline/run
-  → ai-service 执行七 Agent 管线，实时推送 Agent 状态事件（SSE）
+  → ai-service 执行八 Agent 管线，实时推送 Agent 状态事件（SSE）
   → 业务后端转发 SSE 事件流给前端
   → 前端 Vue Flow 动态渲染思维链；在「人在回路暂停点」等待人类介入
   → 人类审阅/修改后继续 → 管线继续执行
@@ -54,17 +54,21 @@
 
 ### 2.2 SSE 事件模型
 
-AI 服务通过 SSE 推送以下事件类型（字段细节由后端组设计时确定）：
+> 状态：✅ 已实现于 ai-service（`SseEventPublisher` + `PipelineController`），事件按 runId 订阅、支持历史重放。`agent.thinking`（token 级流）待丁贾峻实现 `BailianClient.streamChat` 后接入。
 
-| 事件 | 含义 |
-|---|---|
-| `agent.start` | 某 Agent 开始执行 |
-| `agent.thinking` | Agent 思考过程（token 流） |
-| `agent.result` | 某 Agent 产出阶段性结果 |
-| `pipeline.pause` | 到达人在回路暂停点（等待人类介入） |
-| `pipeline.resume` | 人类确认继续 |
-| `pipeline.done` | 管线完成，输出最终报告 |
-| `pipeline.error` | 管线异常 |
+AI 服务通过 SSE 推送以下事件类型（backend 转发给前端）：
+
+| 事件 | 含义 | 状态 |
+|---|---|---|
+| `agent.start` | 某 Agent 开始执行 | ✅ |
+| `agent.thinking` | Agent 思考过程（token 流） | ⏳ 待 streamChat |
+| `agent.result` | 某 Agent 产出阶段性结果 | ✅ |
+| `pipeline.pause` | 到达人在回路暂停点（等待人类介入） | ✅ |
+| `pipeline.resume` | 人类确认继续 | ✅ |
+| `pipeline.done` | 管线完成，输出最终报告 | ✅ |
+| `pipeline.error` | 管线异常 | ✅ |
+
+订阅方式：`GET /pipeline/{runId}/stream`（ai-service 8081，backend 转发）；恢复：`POST /pipeline/{runId}/resume`。
 
 ## 3. 服务划分与部署
 
@@ -85,12 +89,12 @@ AI 服务通过 SSE 推送以下事件类型（字段细节由后端组设计时
 | 前后端分离 | 是 | 分工明确，SSE 适合长连接流式场景 |
 | 业务后端与 AI 服务 | **两个独立工程** | 职责解耦：业务侧专注 API/持久化，AI 侧专注管线；可独立部署、独立扩容 |
 | SSE 链路 | 前端只连业务后端，业务后端转发 AI 服务流 | 统一出口、便于鉴权与日志记录 |
-| 人在回路实现 | 管线 State 中设置暂停点，等待外部确认事件 | 满足赛题「可交互、具备教学意义」要求 |
+| 人在回路实现 | `PipelineEngine.start()` 异步执行，④ 后发 `pipeline.pause` 阻塞等待，`POST /pipeline/{runId}/resume` 提交审阅意见（可附修改后候选假设）释放 | 满足赛题「可交互、具备教学意义」要求；运行态存内存（生产可换 Redis 持久化） |
 | 向量数据库 | 开发用 Chroma，生产切 Milvus | 配置化切换（`VECTOR_DB` 环境变量） |
 
-## 5. 扩展与容错（由团队细化）
+## 5. 扩展与容错（部分已实现，其余由团队细化）
 
-- Agent 级超时与重试
-- LLM 调用限流与成本控制（Qwen-Max 重任务 / Qwen-Plus 轻任务分级）
-- 任务断点恢复（State 持久化）
+- Agent 级超时与重试：✅ `BailianClient` 60s 超时 + 5xx/网络异常重试 1 次（`BAILIAN_TIMEOUT_SECONDS` 可配）
+- LLM 调用限流与成本控制：✅ 模型分级路由（heavy→`QWEN_MODEL`/light→`QWEN_LIGHT_MODEL`/turbo→`QWEN_TURBO_MODEL`，BailianClient 别名映射）
+- 任务断点恢复：⏳ 运行态当前存内存（runId → PipelineContext），重启丢失；生产升级为 Redis/DB 持久化（由团队细化）
 - API 调用日志与百炼凭证截图留存（赛题强制要求）

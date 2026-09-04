@@ -9,15 +9,15 @@
 
 2026「挑战杯」揭榜挂帅大赛（XH-202619）参赛作品：基于国产开源大模型 **Qwen**（阿里云百炼平台）的 **AI Scientist**——一个「文献/数据输入 → 可验证科学假设输出」的多智能体系统。
 
-- 后端：Spring Boot 3.x + Java 17 + **LangChain4j 0.35.0**（`ai-service`）
-- 七 Agent DAG 管线 + 四库 RAG（论文/方法/数据/证据库）+ 人在回路
+- 后端：Spring Boot 3.x + Java 17 + **LangChain4j 1.18.1**（`ai-service`）
+- 八 Agent DAG 管线 + 四库 RAG（论文/方法/数据/证据库）+ 人在回路
 - 最终输出：10 字段《科学假设与研究计划》（**引用严禁虚构**，赛题硬性要求）
 
 ## 2. 必读文档（动手前按序读）
 
 | 文档 | 内容 |
 |---|---|
-| `docs/agents.md` | **七 Agent 管线设计**（编排顺序、状态机、输出字段） |
+| `docs/agents.md` | **八 Agent 管线设计**（编排顺序、状态机、输出字段） |
 | `docs/architecture.md` | 四层架构与通信链路 |
 | `docs/rag.md` | 四库 RAG 设计（**灌库脚本已实现**，JSONL 输入契约 + collection 命名 + 检索对齐见第 6/7 节） |
 | `docs/contribution.md` | 开发规范（分支/提交/代码规范） |
@@ -26,14 +26,14 @@
 ## 3. 仓库结构
 
 ```
-ai-service/   多智能体服务（LangChain4j 七 Agent 管线）★ 大部分任务在这里
+ai-service/   多智能体服务（LangChain4j 八 Agent 管线）★ 大部分任务在这里
 backend/      业务后端（REST API / SSE / MySQL）——表结构由团队定，勿固化
 frontend/     Vue3 前端（人在回路交互）
 data/         Python 数据处理脚本
 docs/         全部设计文档
 ```
 
-## 4. 七 Agent 管线编排顺序（严格遵守）
+## 4. 八 Agent 管线编排顺序（严格遵守）
 
 ```
 用户输入科研问题
@@ -41,16 +41,19 @@ docs/         全部设计文档
     ▼
 ① 问题理解 Agent ──拆解为结构化子查询（领域标签/关键概念/已知条件/待求解变量）
     │
-    ├───────────┬───────────┬───────────┐
-    ▼           ▼           ▼           │
-② 文献检索   ③ 知识发现   ④ 假设生成    │
-   Agent       Agent       Agent        │  （并行执行）
-    │           │           │           │
-    └───────────┴─────┬─────┴───────────┘
-                      ▼
+    ├───────────┬───────────┐
+    ▼           ▼           │
+② 文献检索   ③ 知识发现    │  （并行执行，互不依赖，各自自足 RAG）
+   Agent       Agent        │
+    │           │           │
+    └─────┬─────┴─────┬─────┘
+          ▼           ▼
+       ④ 假设生成 Agent（串行，消费 ③ 的 Gap/选题 + ② 的文献）
+          │
+          ▼
         【人在回路暂停点：人类介入审阅】← 前端 Vue Flow 展示
-                      │
-                      ▼
+          │
+          ▼
 ⑤ 科学假设评估 Agent（多维度评分 + 幻觉检测）
                       │
                       ▼
@@ -60,10 +63,13 @@ docs/         全部设计文档
 ⑦ 思辨辩论 Agent（倡议者 vs 质疑者 结构化辩论，多轮迭代）
                       │
                       ▼
+⑧ 报告生成 Agent（融合 ①-⑦ 产物，组装 10 字段《科学假设与研究计划》）
+                      │
+                      ▼
        输出 10 字段《科学假设与研究计划》
 ```
 
-编排由 `PipelineEngine` 实现（①→②③④并行→暂停→⑤→⑥→⑦→组装输出），**不需要你改编排逻辑**。
+编排由 `PipelineEngine` 实现（①→②∥③并行→④→暂停→⑤→⑥→⑦→⑧→组装输出），**不需要你改编排逻辑**。
 
 ## 5. 你的核心任务：接入一个 Agent（可插拔）
 
@@ -120,13 +126,14 @@ public class KnowledgeDiscoveryStage implements PipelineAgent {
 |---|---|---|---|
 | ① 问题理解 | `getQuestion()` | `setQuestionQuery()` | `QuestionQuery` |
 | ② 文献检索 | `getQuestionQuery()` | `setLiterature()` | `LiteratureResult`（papers 复用 `PaperEvidence`） |
-| ③ 知识发现 | `getQuestion()` / `getLiterature()` | `setKnowledgeDiscovery()` | `DiscoveryResult`（马艺萌，已接入） |
-| ④ 假设生成 | `getKnowledgeDiscovery()` 的 selectedProblem/researchGaps 等 | `setHypothesis()` | `HypothesisResult` |
+| ③ 知识发现 | `getQuestion()`（**自足 RAG**，不读 ②，避免并行竞态） | `setKnowledgeDiscovery()` | `DiscoveryResult`（马艺萌，已接入） |
+| ④ 假设生成 | `getKnowledgeDiscovery()` 的 selectedProblem/researchGaps 等 + `getLiterature()` | `setHypothesis()` | `HypothesisResult` |
 | ⑤ 科学假设评估 | `getHypothesis()` | `setEvaluation()` | `EvaluationResult`（含幻觉检测） |
 | ⑥ 实验设计 | `getEvaluation()` 的最优假设 | `setExperiment()` | `ExperimentResult` |
 | ⑦ 思辨辩论 | `getEvaluation()` / `getExperiment()` | `setDebate()` | `DebateResult` |
+| ⑧ 报告生成 | ①-⑦ 全部产物 | `setFinalReport()` | `ResearchPlan` |
 
-**数据流主线**：`① 子查询 → ② 文献 + ③ Gap/选题 + ④ 候选假设 → [人回路] → ⑤ 评分+幻觉检测 → ⑥ 实验方案 → ⑦ 辩论完善 → 10 字段报告`
+**数据流主线**：`① 子查询 → ②∥③ 文献 + Gap/选题 → ④ 候选假设 → [人回路] → ⑤ 评分+幻觉检测 → ⑥ 实验方案 → ⑦ 辩论完善 → ⑧ 报告组装 → 10 字段报告`
 
 ## 7. 硬性规则（违反 = 打回）
 

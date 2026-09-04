@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import PipelineView from './views/PipelineView.vue'
+import { RouterView } from 'vue-router'
 </script>
 
 <template>
-  <el-container style="height: 100vh">
-    <el-header>
-      <h2 style="margin: 0; line-height: 60px">AI Scientist · 科研灵感流水线</h2>
-    </el-header>
-    <el-main>
-      <PipelineView />
-    </el-main>
-  </el-container>
+  <RouterView />
 </template>
+
+<style>
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Arial, sans-serif;
+  background-color: #f5f7fa;
+}
+</style>

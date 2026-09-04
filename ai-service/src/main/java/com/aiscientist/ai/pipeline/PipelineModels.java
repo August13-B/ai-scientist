@@ -39,11 +39,33 @@ public final class PipelineModels {
 
     // ==================== ② 文献检索 Agent 输出 ====================
 
-    /** 召回文献（复用 PaperEvidence 契约）+ 关键发现 + 引用链 */
+    /** 单条关键发现（绑定召回来源 evidenceIds，白名单可校验，严禁虚构） */
+    public record KeyFinding(
+            String finding,
+            List<String> evidenceIds
+    ) {
+        public KeyFinding {
+            finding = requireText(finding, "finding");
+            evidenceIds = immutable(evidenceIds);
+        }
+    }
+
+    /** 召回文献间的逻辑关联说明（如「A 方法基于 B 理论，共同支撑某论点」，绑定召回来源） */
+    public record CitationChain(
+            String chain,
+            List<String> evidenceIds
+    ) {
+        public CitationChain {
+            chain = requireText(chain, "chain");
+            evidenceIds = immutable(evidenceIds);
+        }
+    }
+
+    /** 文献检索输出：召回文献（papers）+ 关键发现 + 文献间逻辑关联链 */
     public record LiteratureResult(
             List<PaperEvidence> papers,
-            List<String> keyFindings,
-            List<String> citationChains
+            List<KeyFinding> keyFindings,
+            List<CitationChain> citationChains
     ) {
         public LiteratureResult {
             papers = immutable(papers);
@@ -144,6 +166,28 @@ public final class PipelineModels {
         }
     }
 
+    // ==================== 人在回路（Human-in-the-Loop）====================
+
+    /**
+     * 人类审阅意见（暂停点 resume 时提交）。
+     * <p>语义：人类在 ④ 假设生成后审阅候选假设，可仅确认（两字段皆空）、
+     * 可附审阅意见、可提交修改后的候选假设列表（替换或追加到 ④ 输出，
+     * 供 ⑤ 评估与 ⑦ 辩论消费）。字段均为可选。</p>
+     */
+    public record HumanFeedback(
+            String reviewComment,
+            List<Hypothesis> revisedHypotheses
+    ) {
+        public HumanFeedback {
+            reviewComment = hasText(reviewComment) ? reviewComment.trim() : null;
+            revisedHypotheses = immutable(revisedHypotheses);
+        }
+
+        public boolean isEmpty() {
+            return reviewComment == null && revisedHypotheses.isEmpty();
+        }
+    }
+
     // ==================== ⑦ 思辨辩论 Agent 输出 ====================
 
     /** 辩论纪要 + 对研究计划的完善意见 */
@@ -163,6 +207,10 @@ public final class PipelineModels {
             throw new IllegalArgumentException(field + " must not be blank");
         }
         return value.trim();
+    }
+
+    static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     static <T> List<T> immutable(List<T> values) {

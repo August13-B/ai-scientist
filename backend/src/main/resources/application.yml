@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: ai-scientist-backend
+  # 纯转发网关：不持久化，排除 DataSource/JPA（无需 MySQL 即可启动；将来启用持久化可移除这两行）
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
   datasource:
     url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:ai_scientist}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USER:root}

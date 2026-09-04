@@ -35,6 +35,9 @@ public class PipelineContext {
     /** ⑦ 思辨辩论输出 */
     private PipelineModels.DebateResult debate;
 
+    /** 人在回路：人类审阅意见（④ 后暂停点 resume 时写入，供 ⑤⑦ 消费） */
+    private PipelineModels.HumanFeedback humanFeedback;
+
     /** 最终 10 字段《科学假设与研究计划》 */
     private ResearchPlan finalReport;
 
@@ -110,6 +113,14 @@ public class PipelineContext {
         this.finalReport = finalReport;
     }
 
+    public PipelineModels.HumanFeedback getHumanFeedback() {
+        return humanFeedback;
+    }
+
+    public void setHumanFeedback(PipelineModels.HumanFeedback humanFeedback) {
+        this.humanFeedback = humanFeedback;
+    }
+
     /** 已接入的 Agent 阶段（调试用） */
     public List<AgentStage> completedStages() {
         java.util.ArrayList<AgentStage> done = new java.util.ArrayList<>();
@@ -133,6 +144,9 @@ public class PipelineContext {
         }
         if (debate != null) {
             done.add(AgentStage.DEBATE);
+        }
+        if (finalReport != null) {
+            done.add(AgentStage.REPORT);
         }
         return List.copyOf(done);
     }

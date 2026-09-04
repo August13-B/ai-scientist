@@ -4,6 +4,7 @@ import com.aiscientist.ai.llm.BailianClient;
 import com.aiscientist.ai.rag.RagSearchService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -22,20 +23,27 @@ import static com.aiscientist.ai.agent.KnowledgeDiscoveryModels.PaperEvidence;
 @Service
 public class KnowledgeDiscoveryAgent {
 
-    private static final String MODEL = "qwen-plus";
+    /** 知识发现为重任务：走 Qwen-Max 分级（BailianClient 内部映射到 QWEN_MODEL） */
+    private static final String MODEL = "qwen-max";
+    /** JSON 解析失败重试次数 */
+    private static final int MAX_ATTEMPTS = 2;
 
     private final BailianClient bailianClient;
     private final RagSearchService ragSearchService;
     private final ObjectMapper objectMapper;
+    /** 调试模式（RAG_MOCK_SAMPLES=true）：放宽来源白名单与覆盖性校验，便于无 RAG/临时关闭时跑通 */
+    private final boolean mockSamples;
 
     public KnowledgeDiscoveryAgent(
             BailianClient bailianClient,
             RagSearchService ragSearchService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            @Value("${vector.mock-samples:false}") boolean mockSamples
     ) {
         this.bailianClient = bailianClient;
         this.ragSearchService = ragSearchService;
         this.objectMapper = objectMapper;
+        this.mockSamples = mockSamples;
     }
 
     public DiscoveryResult discover(DiscoveryRequest request) {
@@ -87,18 +95,13 @@ public class KnowledgeDiscoveryAgent {
         if (!request.evidence().isEmpty()) {
             evidence = request.evidence();
         } else {
-            List<Object> results = ragSearchService.search(
+            // RAG 检索返回已是 PaperEvidence 契约（RagSearchService 保证字段对齐）
+            List<PaperEvidence> results = ragSearchService.search(
                     "papers", request.question(), request.topK());
             if (results == null || results.isEmpty()) {
                 throw new IllegalArgumentException("论文检索未返回可追溯证据");
             }
-            try {
-                evidence = results.stream()
-                        .map(this::toPaperEvidence)
-                        .toList();
-            } catch (IllegalArgumentException exception) {
-                throw new IllegalArgumentException("论文检索返回了无效证据", exception);
-            }
+            evidence = results;
         }
 
         Map<String, PaperEvidence> distinct = new LinkedHashMap<>();
@@ -107,13 +110,6 @@ public class KnowledgeDiscoveryAgent {
             throw new IllegalArgumentException("知识发现至少需要两篇不同来源论文");
         }
         return List.copyOf(distinct.values());
-    }
-
-    private PaperEvidence toPaperEvidence(Object result) {
-        if (result instanceof PaperEvidence paperEvidence) {
-            return paperEvidence;
-        }
-        return objectMapper.convertValue(result, PaperEvidence.class);
     }
 
     private Map<String, Object> payload(
@@ -134,13 +130,26 @@ public class KnowledgeDiscoveryAgent {
             Object input,
             Class<T> outputType
     ) {
+        String userMessage;
         try {
-            String userMessage = objectMapper.writeValueAsString(input);
-            String response = bailianClient.chat(MODEL, systemPrompt, userMessage);
-            return objectMapper.readValue(stripCodeFence(response), outputType);
-        } catch (JsonProcessingException | IllegalArgumentException exception) {
-            throw new IllegalStateException(stage + "返回了无效 JSON", exception);
+            userMessage = objectMapper.writeValueAsString(input);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException(stage + "参数序列化失败", exception);
         }
+        // 解析失败重试 1 次（提示重出纯 JSON），并提取最外层 JSON 对象（容忍前后解释文字/``` 块）
+        String lastError = null;
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            String response = bailianClient.chat(MODEL, systemPrompt, userMessage);
+            try {
+                return objectMapper.readValue(extractJsonObject(response), outputType);
+            } catch (JsonProcessingException | IllegalArgumentException exception) {
+                lastError = stage + "返回了无效 JSON（第 " + attempt + " 次）：" + exception.getMessage();
+                if (attempt < MAX_ATTEMPTS) {
+                    systemPrompt += "\n上一次输出无法解析。请只输出一个合法的 JSON 对象，不要任何解释文字。";
+                }
+            }
+        }
+        throw new IllegalStateException(lastError == null ? stage + "返回了无效 JSON" : lastError);
     }
 
     private void validateResultSources(
@@ -150,6 +159,10 @@ public class KnowledgeDiscoveryAgent {
         if (result.researchGaps().isEmpty()) {
             throw new IllegalStateException(
                     "知识发现结果至少包含一个 Research Gap");
+        }
+        // 调试模式（临时关 RAG）：放宽来源白名单与 gap 覆盖校验，仅保留非空/基本结构
+        if (mockSamples) {
+            return;
         }
         requireSources(result.references(), allowedSources);
         result.researchGaps().forEach(gap ->
@@ -167,6 +180,10 @@ public class KnowledgeDiscoveryAgent {
             EvidenceExtraction extraction,
             Set<String> allowedSources
     ) {
+        // 调试模式（临时关 RAG）：不强制逐篇覆盖输入来源（mock 样例可能不稳定）
+        if (mockSamples) {
+            return;
+        }
         List<String> sources = extraction.papers().stream()
                 .map(KnowledgeDiscoveryModels.PaperAnalysis::sourceId)
                 .toList();
@@ -185,19 +202,16 @@ public class KnowledgeDiscoveryAgent {
         }
     }
 
-    private String stripCodeFence(String response) {
+    /** 提取最外层 JSON 对象：剥 ``` 块 + 容忍前后解释文字（取第一个 { 到最后一个 }） */
+    private String extractJsonObject(String response) {
         if (response == null) {
             throw new IllegalArgumentException("model response must not be null");
         }
-        String json = response.trim();
-        if (json.startsWith("```")) {
-            int firstLineEnd = json.indexOf('\n');
-            int lastFence = json.lastIndexOf("```");
-            if (firstLineEnd < 0 || lastFence <= firstLineEnd) {
-                throw new IllegalArgumentException("invalid JSON code fence");
-            }
-            json = json.substring(firstLineEnd + 1, lastFence).trim();
+        int start = response.indexOf('{');
+        int end = response.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            throw new IllegalArgumentException("model response 中没有 JSON 对象");
         }
-        return json;
+        return response.substring(start, end + 1);
     }
 }

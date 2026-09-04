@@ -23,4 +23,13 @@ public interface EventPublisher {
      * @param data      事件负载（Agent 名称、阶段产物等）
      */
     void publish(String taskId, String eventType, Object data);
+
+    /**
+     * 管线结束：清理订阅、释放连接（默认空实现，SSE 发布器覆写）。
+     *
+     * @param taskId 任务标识
+     */
+    default void complete(String taskId) {
+        // 默认无订阅需清理
+    }
 }

@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rag_base import BaseIngester, main  # noqa: E402
+from rag_common import normalize_source  # noqa: E402
 
 
 class PapersIngester(BaseIngester):
@@ -45,23 +46,7 @@ class PapersIngester(BaseIngester):
 
         # 分块对象：摘要+正文拼接后按 512/64 分块
         text = f"{title}\n{abstract}\n{content}".strip()
-        chunks = self.split_text(text, self.CHUNK_SIZE, self.CHUNK_OVERLAP)
-        return [{"text": c, "metadata": dict(metadata)} for c in chunks]
-
-
-def normalize_source(doi=None, pmid=None, url=None) -> str:
-    """规范化来源标识（与 ai-service PaperEvidence.sourceId 对齐）：doi:xxx / pmid:xxx / url:xxx。"""
-    if doi:
-        d = doi.strip()
-        for prefix in ("doi:", "http://dx.doi.org/", "https://dx.doi.org/", "http://doi.org/", "https://doi.org/"):
-            if d.lower().startswith(prefix):
-                d = d[len(prefix):]
-        return f"doi:{d.lower()}"
-    if pmid:
-        return f"pmid:{pmid.strip().lstrip('pmid:').lstrip('PMID:')}"
-    if url:
-        return f"url:{url.strip()}"
-    raise ValueError("每条论文必须包含 doi / pmid / url 至少一种来源标识")
+        return self.create_chunk_payloads(text, metadata)
 
 
 if __name__ == "__main__":

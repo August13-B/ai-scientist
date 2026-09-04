@@ -25,7 +25,10 @@ public enum AgentStage {
     EXPERIMENT(6),
 
     /** ⑦ 思辨辩论：倡议者 vs 质疑者 */
-    DEBATE(7);
+    DEBATE(7),
+
+    /** ⑧ 报告生成：融合全部 Agent 产物输出 10 字段《科学假设与研究计划》 */
+    REPORT(8);
 
     private final int order;
 

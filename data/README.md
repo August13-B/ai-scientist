@@ -19,6 +19,8 @@ python scripts/pdf_parser.py --input ./pdfs --output ./processed
 
 ## 四库灌库（RAG）
 
+> 🚨 **字段标准**：灌库前必读 **[docs/rag-field-standard.md](../docs/rag-field-standard.md)**（JSONL 输入契约 / 入库 metadata / title 等价字段 / source_id 规则）；标准执行版校验脚本见下方 `validate_records.py`。
+
 数据清洗产物为 JSONL（每行一条，必带来源标识），灌库脚本写入 Chroma（开发）/ Milvus（生产）：
 
 ```bash
@@ -28,17 +30,26 @@ docker compose up -d chroma
 # 2. 配置 .env（ALIYUN_BAILIAN_API_KEY 必填，供 Embedding 用）
 cp ../.env.example ../.env
 
-# 3. 四库分别灌入
+# 3. 灌库前校验（四库逐份通过后再灌，exit code 0 才允许继续）
+python scripts/validate_records.py --input data/processed
+
+# 4. 四库分别灌入
 python scripts/ingest_papers.py --input data/processed/papers.jsonl
 python scripts/ingest_methods.py --input data/processed/methods.jsonl
 python scripts/ingest_datasets.py --input data/processed/datasets.jsonl
 python scripts/ingest_evidence.py --input data/processed/evidence.jsonl
+
+# 5. 已有 text-embedding-v4/1024 维预计算向量时，先校验再幂等导入
+python data/scripts/import_precomputed_vectors.py --input vectors --check-only
+python data/scripts/import_precomputed_vectors.py --input vectors --batch-size 64
 ```
 
-- 向量化：百炼 DashScope Embedding API（`EMBEDDING_PROVIDER=dashscope`，模型 text-embedding-v3）
+- 向量化：百炼 DashScope Embedding API（`EMBEDDING_PROVIDER=dashscope`，模型 text-embedding-v4；单批最多 10 条）
 - 目标库切换：`.env` 的 `VECTOR_DB=chroma|milvus`
-- 分块：chunk_size=512, overlap=64（脚本 `--chunk-size/--chunk-overlap` 可覆盖）
+- 分块：默认 `chunk_size=512, overlap=64`（脚本 `--chunk-size/--chunk-overlap` 可覆盖），优先按段落、换行和中英文句末切分；仅超长语义单元才按字符截断。
+- 四库统一写入 payload：`id`、`text`、`metadata`。metadata 固定含 `source_id`、`chunk_index`、`chunk_total`、`chunk_start`、`chunk_end`；ID 可重现，方便增量排查和重灌。
 - 幂等：重灌先删后建；每条记录必须携带 `doi/pmid/url` 来源标识（幻觉检测地基）
+- 预计算向量采用 upsert 导入独立的 `*_vectors` 集合，并生成带文件名、页码、分块号的 `localdoc://` 稳定来源标识；重复执行不会重复累计。
 
 ## 目录结构
 
@@ -47,11 +58,16 @@ data/
 ├── scripts/
 │   ├── pdf_parser.py       # PDF 批量解析脚本（骨架）
 │   ├── rag_common.py       # 公共配置：向量库连接 + Embedding（百炼）
-│   ├── rag_base.py         # 灌库公共基类（JSONL→分块→向量化→入库）
+│   ├── chunking.py         # 语义优先分块器（段落/句子边界 + 偏移）
+│   ├── rag_base.py         # 灌库公共基类（统一 chunk 契约 → 向量化 → 入库）
+│   ├── validate_records.py # 灌库输入 JSONL 契约校验（标准：docs/rag-field-standard.md）
 │   ├── ingest_papers.py    # 论文库灌库（collection: papers）
 │   ├── ingest_methods.py   # 方法库灌库（collection: methods）
 │   ├── ingest_datasets.py  # 数据集库灌库（collection: datasets）
-│   └── ingest_evidence.py  # 证据库灌库（collection: evidence）
+│   ├── ingest_evidence.py  # 证据库灌库（collection: evidence）
+│   └── import_precomputed_vectors.py # 校验并导入 vectors/*.vectors.jsonl
+├── tests/
+│   └── test_chunking.py    # 分块与四库输出契约单元测试
 ├── raw/                   # 原始文献/数据（gitignore，不入仓库）
 ├── processed/             # 清洗后数据（gitignore，不入仓库）
 └── datasets/              # 整理后的公开数据集（gitignore，不入仓库）
