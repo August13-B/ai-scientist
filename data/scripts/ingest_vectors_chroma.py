@@ -9,6 +9,9 @@
   - source_id：从 text 提取真实 DOI/PMID/URL → doi:xxx（供引用核验）；提取不到 → url:doc-<sha256>
   - title / content / source_file / page / sha256 / chunk_index / route_reason 溯源字段
 
+✅ 这是「生产标准」灌库入口：写入官方集合名 papers/methods/datasets/evidence（与 RagSearchService 一致）。
+另一个 import_precomputed_vectors.py 写入带 *_vectors 后缀的集合，属补充；RagSearchService 对两者都容错。
+
 用法（在 data/ 目录下）：
     python scripts/ingest_vectors_chroma.py --vectors /path/to/output/vectors
     python scripts/ingest_vectors_chroma.py --vectors ../马艺萌-四库数据与向量化-最新版/output/vectors

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""把 vectors/*.vectors.jsonl 中的预计算向量幂等导入 Chroma。
+"""把 vectors/*.vectors.jsonl 中的预计算向量幂等导入 Chroma（写入 *_vectors 集合）。
 
-上传向量与人工精选的小型四库使用不同集合：
-  papers_vectors / methods_vectors / datasets_vectors / evidence_vectors
+⚠️ 集合命名注意：
+  本脚本写入 papers_vectors / methods_vectors / datasets_vectors / evidence_vectors（带 *_vectors 后缀）。
+  若要让生产检索（RagSearchService.search）命中官方集合名（papers/methods/datasets/evidence，不带后缀），
+  请改用 ingest_vectors_chroma.py。RagSearchService 现对两者都容错（哪个存在用哪个），
+  但团队约定的「生产标准」是 ingest_vectors_chroma.py。
 
-这样既能利用 4357 个论文原文分块，又不会覆盖带 DOI/HTTP URL 的精选证据库。
-Java 检索端会对两个集合做配额式混合召回。
+用途：既利用 4357 个论文原文分块，又不覆盖带 DOI/HTTP URL 的精选四库。
+Java 检索端对两个集合做配额式混合召回。
 """
 
 from __future__ import annotations
