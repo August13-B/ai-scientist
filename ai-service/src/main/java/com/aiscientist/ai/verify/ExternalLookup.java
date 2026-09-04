@@ -41,6 +41,9 @@ public interface ExternalLookup {
     /** 按 PMID 精确查询 */
     Result findByPmid(String pmid);
 
+    /** 按本地四库的规范化来源标识精确查询（如 url:https://...） */
+    Result findBySourceId(String sourceId);
+
     /** 按标题查询（本地 RAG 库），返回命中的真实标题或 null */
     String findByTitle(String title);
 }

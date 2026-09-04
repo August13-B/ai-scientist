@@ -100,7 +100,7 @@ public class EvaluationStage implements PipelineAgent {
                     if (ok) {
                         verifiedCount++;
                         if (check.matchedTitle() != null) {
-                            verifiedReferences.add("doi:" + safe(citation));
+                            verifiedReferences.add(canonicalReference(citation));
                         }
                     } else if (check.status() == CitationStatus.NOT_FOUND
                             || check.status() == CitationStatus.SUSPICIOUS) {
@@ -210,12 +210,24 @@ public class EvaluationStage implements PipelineAgent {
         return text.length() <= 800 ? text : text.substring(0, 800);
     }
 
-    private static String safe(String citation) {
-        String trimmed = citation == null ? "" : citation.trim();
-        String lower = trimmed.toLowerCase();
-        if (lower.startsWith("doi:")) {
-            return trimmed.substring(4);
+    /** 保留真实引用类型，避免把 url:https://... 错写成 doi:url:https://...。 */
+    private static String canonicalReference(String citation) {
+        String doi = CitationVerifier.extractDoi(citation);
+        if (doi != null) {
+            return "doi:" + doi.toLowerCase();
         }
-        return trimmed;
+        String arxiv = CitationVerifier.extractArxiv(citation);
+        if (arxiv != null) {
+            return "arXiv:" + arxiv;
+        }
+        String pmid = CitationVerifier.extractPmid(citation);
+        if (pmid != null) {
+            return "pmid:" + pmid;
+        }
+        String url = CitationVerifier.extractUrl(citation);
+        if (url != null) {
+            return "url:" + url;
+        }
+        return citation == null ? "" : citation.trim();
     }
 }

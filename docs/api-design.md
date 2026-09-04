@@ -15,6 +15,8 @@
 | GET | `/api/tasks/{id}/report` | 获取生成的研究计划（10 字段 JSON / PDF） |
 | GET | `/api/tasks/{id}/stream` | SSE 流：Agent 思考过程实时推送 |
 | POST | `/api/tasks/{id}/intervene` | 人在回路：提交人类审阅意见/修改参数，恢复管线 |
+| GET | `/api/knowledge/stats` | 四库数据量、向量模型与运行状态 |
+| POST | `/api/knowledge/search` | 四库混合向量检索（精选来源 + 上传全文分块） |
 | DELETE | `/api/tasks/{id}` | 删除任务记录 |
 | POST | `/api/upload` | 文献/数据文件上传 |
 
@@ -27,7 +29,8 @@
 | POST | `/pipeline/run` | 启动八 Agent 管线（业务后端调用），返回 runId 异步执行 | ✅ |
 | POST | `/pipeline/{runId}/resume` | 人在回路恢复点：提交审阅意见/修改后候选假设，继续执行 | ✅ |
 | GET | `/pipeline/{runId}/stream` | SSE 流：Agent 状态事件（业务后端转发），支持历史重放 | ✅ |
-| POST | `/rag/search` | 四库混合检索接口（papers/methods/datasets/evidence） | ✅ |
+| POST | `/pipeline/rag/search` | 四库混合检索接口（papers/methods/datasets/evidence） | ✅ |
+| GET | `/pipeline/rag/stats` | 四库 Chroma 集合统计与向量配置 | ✅ |
 | GET | `/pipeline/{runId}/state` | 查询管线 State（各阶段产物快照） | ✅ |
 
 > backend 转发（`/api/tasks/{id}/stream`、`/api/tasks/{id}/intervene`）由后端组实现。
@@ -92,7 +95,7 @@
 | 中间件 | 无需 Chroma；backend 用 MySQL | 需 Chroma + MySQL（docker） |
 | 核心链路接口 | `POST /pipeline/run`、`GET /pipeline/{runId}/stream`、`POST /pipeline/{runId}/resume`、`GET /pipeline/{runId}/state` | 同左 |
 | 可视化/调试接口 | **额外**：`GET /pipeline/runs`、`GET /pipeline/{runId}/trace`、`GET /pipeline/{runId}/debug`（排查每个 Agent 输入输出） | 可选（生产可关闭） |
-| RAG 检索 | 无需 `POST /rag/search`（mock 内部返回） | `POST /rag/search` 可直查四库 |
+| RAG 检索 | 无需 `POST /pipeline/rag/search`（mock 内部返回） | `POST /pipeline/rag/search` 可直查四库 |
 
 **前端调用约定**：
 - 核心流程（发起 → SSE 流式 → 人在回路 resume → 完成）两模式**接口一致**，前端无感切换；

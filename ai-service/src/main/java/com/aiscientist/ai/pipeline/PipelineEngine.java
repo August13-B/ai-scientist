@@ -54,7 +54,14 @@ public class PipelineEngine {
     private final EventPublisher eventPublisher;
     private final ExecutorService parallelPool = newDaemonPool(
             Math.max(2, PARALLEL_STAGES.size()), "pipeline-parallel");
-    private final ExecutorService pipelinePool = newDaemonPool(1, "pipeline-run");
+    /**
+     * 每条异步管线使用独立线程。
+     *
+     * <p>管线会在人工审阅点阻塞等待 resume，固定单线程会导致首个待审任务
+     * 占住执行器，使后续任务始终停留在空 trace。缓存线程池让不同任务互不阻塞；
+     * 单条任务内部的文献与知识发现仍由 parallelPool 控制并行度。</p>
+     */
+    private final ExecutorService pipelinePool = newDaemonCachedPool("pipeline-run");
     private final Map<String, PipelineRuntime> runtimes = new ConcurrentHashMap<>();
 
     /**
@@ -360,6 +367,15 @@ public class PipelineEngine {
             return thread;
         };
         return Executors.newFixedThreadPool(size, factory);
+    }
+
+    private static ExecutorService newDaemonCachedPool(String name) {
+        ThreadFactory factory = runnable -> {
+            Thread thread = new Thread(runnable, name + "-" + System.nanoTime());
+            thread.setDaemon(true);
+            return thread;
+        };
+        return Executors.newCachedThreadPool(factory);
     }
 
     /** 单任务运行态：ctx + 暂停闩 + 完成信号 + 执行追踪 */

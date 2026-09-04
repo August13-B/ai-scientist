@@ -50,7 +50,7 @@ public class BailianExperimentPlanGenerator implements ExperimentPlanGenerator {
 
                     强制规则：
                     1. 只能使用下方证据，不得虚构论文、DOI、PMID、数据集或实验结果。
-                    2. 如果证据未支持某个具体数据集名称，只描述数据集选择标准，不得编造名称。
+                    2. datasets 只能选择 tags 中含 allowed-dataset 的证据；每项必须原样包含其 sourceTitle 和 sourceUri，不得编造名称或链接。
                     3. expectedResults只能写待验证的方向、范围和判定条件，不能声称实验已经完成。
                     4. Baseline必须可复现且公平控制数据和计算预算。
                     5. Metrics必须包括主要指标、统计不确定性、显著性/效应量、稳健性和资源成本。

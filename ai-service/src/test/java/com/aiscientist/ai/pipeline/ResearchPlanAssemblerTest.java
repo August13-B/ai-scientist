@@ -9,6 +9,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 10 字段《科学假设与研究计划》组装器单元测试。
@@ -74,8 +75,10 @@ class ResearchPlanAssemblerTest {
         assertEquals("预期 ViT 准确率提升 5 个百分点", plan.results());
         assertEquals(List.of("CNN 基线", "ViT 基线"), plan.experiments().baselines());
         assertEquals(List.of("准确率", "F1"), plan.experiments().metrics());
-        // 无知识发现产物时 references 保持占位（评估的 references 当前未被消费）
-        assertEquals(List.of(PENDING), plan.references());
+        // 无知识发现产物时仍使用评估阶段已经核验的 references
+        assertEquals(List.of("doi:10.1000/a"), plan.references());
+        assertEquals(List.of("水稻病害数据集"), plan.datasets().source());
+        assertTrue(plan.datasets().target().stream().anyMatch(item -> item.contains("设备与型号隔离")));
         // 未设假设生成产物：字段 2/3/7 仍为占位
         assertEquals(PENDING, plan.rationale());
         assertEquals(List.of(PENDING), plan.technicalDetails());

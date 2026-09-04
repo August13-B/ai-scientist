@@ -57,6 +57,40 @@ class CitationVerifierTest {
     }
 
     @Test
+    void verifiedLocalUrlShouldBeAccepted() {
+        String url = "https://www.usenix.org/conference/atc24/presentation/gu-yunfei";
+        when(lookup.findBySourceId("url:" + url))
+                .thenReturn(ExternalLookup.Result.found("APTN"));
+
+        CitationCheck r = verifier.verify("url:" + url);
+
+        assertEquals(CitationStatus.VERIFIED, r.status());
+        assertEquals("APTN", r.matchedTitle());
+    }
+
+    @Test
+    void unknownLocalUrlShouldBeNotFound() {
+        String url = "https://example.com/not-in-library";
+        when(lookup.findBySourceId("url:" + url))
+                .thenReturn(ExternalLookup.Result.absent());
+
+        CitationCheck r = verifier.verify(url);
+
+        assertEquals(CitationStatus.NOT_FOUND, r.status());
+    }
+
+    @Test
+    void uploadedLocalDocumentShouldBeVerifiedByExactSourceId() {
+        String url = "localdoc://doc-abc/paper.pdf?library=papers&page=3&chunk=2&id=x";
+        when(lookup.findBySourceId("url:" + url))
+                .thenReturn(ExternalLookup.Result.found("paper.pdf · 第3页 · 分块2"));
+
+        CitationCheck result = verifier.verify("url:" + url);
+
+        assertEquals(CitationStatus.VERIFIED, result.status());
+    }
+
+    @Test
     void titleMismatchShouldBeSuspicious() {
         when(lookup.findByDoi("10.1038/nature14539"))
                 .thenReturn(ExternalLookup.Result.found("Deep learning"));

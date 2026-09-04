@@ -25,6 +25,7 @@ public final class CitationVerifier {
     private static final Pattern DOI = Pattern.compile("10\\.\\d{4,9}/[-._;()/:a-zA-Z0-9]+");
     private static final Pattern ARXIV = Pattern.compile("arXiv[:\\s]*(\\d{4}\\.\\d{4,5})", Pattern.CASE_INSENSITIVE);
     private static final Pattern PMID = Pattern.compile("(?i)\\bpmid[:\\s]*(\\d{6,9})\\b");
+    private static final Pattern URL = Pattern.compile("(?i)(?:url:)?((?:https?|localdoc)://\\S+)");
 
     private final ExternalLookup lookup;
 
@@ -42,6 +43,7 @@ public final class CitationVerifier {
         String doi = extractDoi(raw);
         String arxivId = extractArxiv(raw);
         String pmid = extractPmid(raw);
+        String url = extractUrl(raw);
 
         if (doi != null) {
             return verifyDoi(doi, raw);
@@ -51,6 +53,9 @@ public final class CitationVerifier {
         }
         if (pmid != null) {
             return verifyPmid(pmid, raw);
+        }
+        if (url != null) {
+            return verifySourceId("url:" + url, raw);
         }
 
         String title = titleOf(raw);
@@ -120,6 +125,20 @@ public final class CitationVerifier {
         return new CitationCheck(raw, CitationStatus.VERIFIED, r.title(), "命中真实文献");
     }
 
+    private CitationCheck verifySourceId(String sourceId, String raw) {
+        ExternalLookup.Result result = lookup.findBySourceId(sourceId);
+        if (result.status() == ExternalLookup.Result.Status.ERROR) {
+            return new CitationCheck(raw, CitationStatus.UNVERIFIABLE, null,
+                    "本地四库查询异常，请稍后重试或人工确认");
+        }
+        if (result.status() == ExternalLookup.Result.Status.ABSENT) {
+            return new CitationCheck(raw, CitationStatus.NOT_FOUND, null,
+                    "来源链接未在已核验的本地论文库中登记");
+        }
+        return new CitationCheck(raw, CitationStatus.VERIFIED, result.title(),
+                "命中本地四库中的已核验来源");
+    }
+
     /** 批量核验，返回逐条结果 */
     public List<CitationCheck> verifyAll(List<String> citations) {
         return citations == null ? List.of() : citations.stream().map(this::verify).toList();
@@ -171,6 +190,11 @@ public final class CitationVerifier {
 
     public static String extractPmid(String raw) {
         Matcher m = PMID.matcher(raw == null ? "" : raw);
+        return m.find() ? m.group(1) : null;
+    }
+
+    public static String extractUrl(String raw) {
+        Matcher m = URL.matcher(raw == null ? "" : raw);
         return m.find() ? m.group(1) : null;
     }
 }

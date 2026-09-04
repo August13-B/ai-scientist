@@ -197,6 +197,30 @@ class PipelineEngineTest {
     }
 
     @Test
+    void waitingHumanRunDoesNotBlockFollowingRun() throws Exception {
+        PipelineEngine engine = new PipelineEngine(List.of(
+                agent(AgentStage.KNOWLEDGE,
+                        ctx -> ctx.setKnowledgeDiscovery(discoveryResult())),
+                agent(AgentStage.HYPOTHESIS,
+                        ctx -> ctx.setHypothesis(hypothesisResult()))
+        ), new TestEventPublisher());
+
+        String firstRunId = engine.start("第一个研究问题");
+        String secondRunId = engine.start("第二个研究问题");
+
+        awaitHypothesis(engine, firstRunId, 5);
+        awaitHypothesis(engine, secondRunId, 5);
+        assertNotNull(engine.state(firstRunId).getHypothesis());
+        assertNotNull(engine.state(secondRunId).getHypothesis(),
+                "前一任务等待人工审核时，后一任务仍应独立执行到审核点");
+
+        engine.resume(firstRunId, new PipelineModels.HumanFeedback("通过", List.of()));
+        engine.resume(secondRunId, new PipelineModels.HumanFeedback("通过", List.of()));
+        engine.completion(firstRunId).get(5, TimeUnit.SECONDS);
+        engine.completion(secondRunId).get(5, TimeUnit.SECONDS);
+    }
+
+    @Test
     void synchronousRunSkipsHumanPause() {
         // 同步 run()（测试/内部调用）不注册暂停处理器，自动放行
         TestEventPublisher publisher = new TestEventPublisher();
@@ -375,6 +399,22 @@ class PipelineEngineTest {
             }
         }
         fail("超时未等到事件: " + eventType);
+    }
+
+    private static void awaitHypothesis(PipelineEngine engine, String runId, int seconds) {
+        long deadline = System.currentTimeMillis() + seconds * 1000L;
+        while (System.currentTimeMillis() < deadline) {
+            if (engine.state(runId).getHypothesis() != null) {
+                return;
+            }
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                fail("等待假设生成被打断: " + runId);
+            }
+        }
+        fail("超时未生成候选假设: " + runId);
     }
 
     /** 最小知识发现产物（completedStages 依据数据总线产物判断） */

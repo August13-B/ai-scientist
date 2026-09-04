@@ -1,5 +1,7 @@
 package com.aiscientist.ai.pipeline;
 
+import com.aiscientist.ai.agent.KnowledgeDiscoveryModels.PaperEvidence;
+import com.aiscientist.ai.rag.RagSearchService;
 import com.aiscientist.ai.wangwanying.experiment.ExperimentPlanGenerator;
 import com.aiscientist.ai.wangwanying.experiment.GeneratedExperimentContent;
 import org.junit.jupiter.api.Test;
@@ -88,6 +90,30 @@ class ExperimentStageTest {
         assertThatThrownBy(() -> new ExperimentStage(generator, false).execute(contextWithEvaluation()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("not a copy");
+    }
+
+    @Test
+    void productionUsesOnlyTraceableDatasetWhitelist() {
+        ExperimentPlanGenerator generator = mock(ExperimentPlanGenerator.class);
+        when(generator.generate(any(), any())).thenReturn(new GeneratedExperimentContent(
+                List.of("a", "b", "c"), List.of("m1", "m2", "m3", "m4", "m5"),
+                List.of("模型生成的无链接数据集"), List.of("p1", "p2", "p3", "p4", "p5"),
+                List.of("predicted range 5%-10%", "confidence interval excludes zero", "cost is bounded"),
+                List.of("r1", "r2", "r3")));
+        RagSearchService rag = mock(RagSearchService.class);
+        when(rag.searchCurated(any(), any(), any(Integer.class))).thenReturn(List.of(
+                new PaperEvidence("Alibaba SSD SMART Logs", "SMART logs", List.of(), null,
+                        null, null, "https://github.com/alibaba-edu/dcbrain/tree/master/ssd_smart_logs"),
+                new PaperEvidence("Alibaba SSD Open Data", "SSD open data", List.of(), null,
+                        null, null, "https://github.com/alibaba-edu/dcbrain/tree/master/ssd_open_data")));
+
+        PipelineContext context = contextWithEvaluation();
+        new ExperimentStage(generator, false, rag).execute(context);
+
+        assertThat(context.getExperiment().datasets())
+                .containsExactly(
+                        "Alibaba SSD SMART Logs (https://github.com/alibaba-edu/dcbrain/tree/master/ssd_smart_logs)",
+                        "Alibaba SSD Open Data (https://github.com/alibaba-edu/dcbrain/tree/master/ssd_open_data)");
     }
     private PipelineContext contextWithEvaluation() {
         PipelineContext context = new PipelineContext();

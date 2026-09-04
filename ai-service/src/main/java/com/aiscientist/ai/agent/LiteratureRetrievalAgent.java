@@ -32,8 +32,9 @@ import static com.aiscientist.ai.agent.KnowledgeDiscoveryModels.PaperEvidence;
  *   <li><b>提炼（动态路由）</b>：召回 ≤8 篇走单次批量（1 次 LLM 输出 keyFindings +
  *       citationChains）；&gt;8 篇走两阶段（分组逐篇提炼 keyFindings → 跨篇生成
  *       citationChains），控制单次 token 长度。</li>
- *   <li><b>白名单校验</b>：每条 KeyFinding / CitationChain 的 evidenceIds 必须 ∈ 召回
- *       {@code sourceId}，且 keyFindings 覆盖每一篇召回文献（防 LLM 漏篇与虚构）。</li>
+ *   <li><b>确定性补全与白名单校验</b>：模型漏掉某篇时直接依据该篇原文补一条发现；
+ *       每条 KeyFinding / CitationChain 的 evidenceIds 仍必须 ∈ 召回 {@code sourceId}，
+ *       防止 LLM 漏篇导致管线中断，同时继续拦截虚构来源。</li>
  * </ol>
  *
  * <p>RAG 接口预留：检索唯一入口为 {@link RagSearchService#search(String, String, int)}，
@@ -131,6 +132,11 @@ public class LiteratureRetrievalAgent {
             citationChains = linkAcross(query, papers, keyFindings);
         }
 
+        if (!mockSamples) {
+            keyFindings = sanitizeFindings(keyFindings, papers);
+            citationChains = sanitizeChains(citationChains, papers);
+            keyFindings = ensureCoverage(papers, keyFindings);
+        }
         validate(keyFindings, citationChains, papers);
         // 规范化重建：触发 compact 构造器（文本非空 + 不可变列表）；keyFindings 可为空（调试模式放宽）
         List<KeyFinding> normalizedFindings = keyFindings == null
@@ -196,7 +202,6 @@ public class LiteratureRetrievalAgent {
             if (groupFindings == null || groupFindings.isEmpty()) {
                 throw new IllegalStateException("文献检索提炼：分组未返回关键发现");
             }
-            requireCoverage(group, groupFindings);
             findings.addAll(groupFindings);
         }
         return findings;
@@ -220,6 +225,53 @@ public class LiteratureRetrievalAgent {
     // ==================== 校验与规范化 ====================
 
     /**
+     * 过滤模型偶发生成的非白名单 evidenceId；没有任何真实证据的发现直接丢弃，
+     * 随后由 ensureCoverage 使用召回论文原文保守补全，绝不保留虚构引用。
+     */
+    private List<KeyFinding> sanitizeFindings(
+            List<KeyFinding> findings, List<PaperEvidence> papers) {
+        if (findings == null) {
+            return List.of();
+        }
+        Set<String> allowed = allowedSources(papers);
+        return findings.stream()
+                .filter(item -> item != null && !isBlank(item.finding()))
+                .map(item -> new KeyFinding(item.finding(), validSources(item.evidenceIds(), allowed)))
+                .filter(item -> !item.evidenceIds().isEmpty())
+                .toList();
+    }
+
+    /** 非白名单逻辑链不参与后续推理；混合引用仅保留真实召回来源。 */
+    private List<CitationChain> sanitizeChains(
+            List<CitationChain> chains, List<PaperEvidence> papers) {
+        if (chains == null) {
+            return List.of();
+        }
+        Set<String> allowed = allowedSources(papers);
+        return chains.stream()
+                .filter(item -> item != null && !isBlank(item.chain()))
+                .map(item -> new CitationChain(item.chain(), validSources(item.evidenceIds(), allowed)))
+                .filter(item -> !item.evidenceIds().isEmpty())
+                .toList();
+    }
+
+    private Set<String> allowedSources(List<PaperEvidence> papers) {
+        return papers.stream()
+                .map(PaperEvidence::sourceId)
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
+    private List<String> validSources(List<String> evidenceIds, Set<String> allowed) {
+        if (evidenceIds == null) {
+            return List.of();
+        }
+        return evidenceIds.stream()
+                .filter(allowed::contains)
+                .distinct()
+                .toList();
+    }
+
+    /**
      * 白名单强校验：
      * 1. keyFindings 非空（调试模式放宽，临时关闭 RAG 时允许为空）；2. 每篇召回文献必须被至少一条 finding 覆盖（防漏篇）；
      * 3. 每条 finding/chain 的 evidenceIds 非空且全部 ∈ 召回 sourceId（防虚构）。
@@ -229,9 +281,7 @@ public class LiteratureRetrievalAgent {
         if (!mockSamples && (keyFindings == null || keyFindings.isEmpty())) {
             throw new IllegalStateException("文献检索结果必须包含至少一条关键发现");
         }
-        Set<String> allowed = papers.stream()
-                .map(PaperEvidence::sourceId)
-                .collect(Collectors.toUnmodifiableSet());
+        Set<String> allowed = allowedSources(papers);
         // 调试模式放宽覆盖校验（LLM 偶发漏篇不打回）；白名单校验始终保留（防虚构）
         if (!mockSamples) {
             requireCoverage(papers, keyFindings);
@@ -266,6 +316,34 @@ public class LiteratureRetrievalAgent {
         if (!missed.isEmpty()) {
             throw new IllegalStateException("文献检索提炼未覆盖全部召回文献：" + missed);
         }
+    }
+
+    /**
+     * 模型偶发漏篇时，以召回条目自身的标题和原文片段生成保守发现。
+     * 该补全不引入新知识，evidenceId 使用原始 sourceId，因而仍可精确溯源。
+     */
+    private List<KeyFinding> ensureCoverage(
+            List<PaperEvidence> papers, List<KeyFinding> findings) {
+        List<KeyFinding> completed = new ArrayList<>(findings == null ? List.of() : findings);
+        Set<String> covered = completed.stream()
+                .flatMap(finding -> finding.evidenceIds() == null
+                        ? java.util.stream.Stream.empty()
+                        : finding.evidenceIds().stream())
+                .collect(Collectors.toSet());
+        for (PaperEvidence paper : papers) {
+            if (covered.contains(paper.sourceId())) {
+                continue;
+            }
+            String content = paper.content().replaceAll("\\s+", " ").trim();
+            if (content.length() > 220) {
+                content = content.substring(0, 220) + "……";
+            }
+            completed.add(new KeyFinding(
+                    "文献《" + paper.title() + "》提供的可追溯原文证据：" + content,
+                    List.of(paper.sourceId())));
+            covered.add(paper.sourceId());
+        }
+        return List.copyOf(completed);
     }
 
     private void requireSources(List<String> evidenceIds, Set<String> allowed, String what) {
