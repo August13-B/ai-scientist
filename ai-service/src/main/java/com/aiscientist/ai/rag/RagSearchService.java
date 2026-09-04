@@ -128,7 +128,11 @@ public class RagSearchService {
         if (embeddings.isEmpty()) {
             return List.of();
         }
-        List<PaperEvidence> curated = queryChroma(knowledgeBase, embeddings.get(0), topK);
+        // 精选库与 *_vectors 都容忍缺失：哪个集合存在就用哪个，避免因灌库脚本不同
+        // （ingest_vectors_chroma.py 建 papers/…；import_precomputed_vectors.py 建 papers_vectors/…）
+        // 而抛“Chroma 未找到集合”。两者都无则返回空（由下游“至少两篇”报错兜底）。
+        List<PaperEvidence> curated = queryChromaIfPresent(
+                knowledgeBase, embeddings.get(0), topK);
         List<PaperEvidence> uploaded = queryChromaIfPresent(
                 knowledgeBase + "_vectors", embeddings.get(0), topK);
         return hybridMerge(curated, uploaded, topK);
@@ -153,7 +157,8 @@ public class RagSearchService {
         }
         List<List<Double>> embeddings = bailianClient.embed(List.of(query));
         return embeddings.isEmpty() ? List.of()
-                : queryChroma(knowledgeBase, embeddings.get(0), topK);
+                // 与 search() 一致容忍缺失：数据集库可能仅存在 *_vectors 形式
+                : queryChromaIfPresent(knowledgeBase, embeddings.get(0), topK);
     }
 
     /**

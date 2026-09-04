@@ -21,6 +21,14 @@ python scripts/pdf_parser.py --input ./pdfs --output ./processed
 
 > 🚨 **字段标准**：灌库前必读 **[docs/rag-field-standard.md](../docs/rag-field-standard.md)**（JSONL 输入契约 / 入库 metadata / title 等价字段 / source_id 规则）；标准执行版校验脚本见下方 `validate_records.py`。
 
+> ⚠️ **生产灌库脚本选择（重要）**：仓库里有两个针对 `vectors/*.vectors.jsonl` 的灌库脚本，
+> 它们把同一批向量灌进**不同名字的集合**，用错会让生产检索报错：
+> - `scripts/ingest_vectors_chroma.py`（**生产标准**）：写入 `papers/methods/datasets/evidence`（与 `RagSearchService` 官方集合名一致）；
+> - `scripts/import_precomputed_vectors.py`（补充）：写入 `papers_vectors/...`（带 `*_vectors` 后缀）；
+>
+> 生产模式请用 **`ingest_vectors_chroma.py`**。`RagSearchService.search()` 现在对两者都容错（哪个存在用哪个），
+> 但 `stats()` 的 `curated/uploaded` 口径与团队约定以 `ingest_vectors_chroma.py` 为准。
+
 数据清洗产物为 JSONL（每行一条，必带来源标识），灌库脚本写入 Chroma（开发）/ Milvus（生产）：
 
 ```bash
