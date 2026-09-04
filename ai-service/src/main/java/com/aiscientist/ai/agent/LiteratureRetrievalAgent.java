@@ -122,14 +122,21 @@ public class LiteratureRetrievalAgent {
         List<PaperEvidence> papers = retrievePapers(query);
         List<KeyFinding> keyFindings;
         List<CitationChain> citationChains;
-
-        if (papers.size() <= SINGLE_PASS_LIMIT) {
-            Extraction extraction = call(SINGLE_PASS_PROMPT, payload(query, papers), Extraction.class);
-            keyFindings = extraction.keyFindings();
-            citationChains = extraction.citationChains();
-        } else {
-            keyFindings = extractInGroups(query, papers);
-            citationChains = linkAcross(query, papers, keyFindings);
+        try {
+            if (papers.size() <= SINGLE_PASS_LIMIT) {
+                Extraction extraction = call(SINGLE_PASS_PROMPT, payload(query, papers), Extraction.class);
+                keyFindings = extraction.keyFindings();
+                citationChains = extraction.citationChains();
+            } else {
+                keyFindings = extractInGroups(query, papers);
+                citationChains = linkAcross(query, papers, keyFindings);
+            }
+        } catch (RuntimeException extractionFailure) {
+            // LLM 提炼偶发失败（无效 JSON / 空结果 / 超长截断 / API 抖动）：
+            // 确定性回退到逐篇保守补全，保证阶段不因模型抖动而中断。
+            // 回退产出的 finding 均基于召回原文（title + 片段），evidenceId 用原始 sourceId，仍可精确溯源。
+            keyFindings = ensureCoverage(papers, List.of());
+            citationChains = List.of();
         }
 
         if (!mockSamples) {
@@ -359,13 +366,23 @@ public class LiteratureRetrievalAgent {
     // ==================== LLM 调用 ====================
 
     private <T> T call(String systemPrompt, Object input, Class<T> outputType) {
+        final String userMessage;
         try {
-            String userMessage = objectMapper.writeValueAsString(input);
-            String response = bailianClient.chat(MODEL, systemPrompt, userMessage);
-            return objectMapper.readValue(stripCodeFence(response), outputType);
-        } catch (JsonProcessingException | IllegalArgumentException exception) {
-            throw new IllegalStateException("文献检索提炼返回了无效 JSON", exception);
+            userMessage = objectMapper.writeValueAsString(input);
+        } catch (JsonProcessingException serializationException) {
+            throw new IllegalStateException("文献检索提炼：输入序列化失败", serializationException);
         }
+        // 模型偶发返回非 JSON（空内容 / 代码块截断 / 超长被截断）：重试一次再抛，减小抖动
+        RuntimeException lastFailure = new IllegalStateException("文献检索提炼返回了无效 JSON");
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                String response = bailianClient.chat(MODEL, systemPrompt, userMessage);
+                return objectMapper.readValue(stripCodeFence(response), outputType);
+            } catch (JsonProcessingException | IllegalArgumentException exception) {
+                lastFailure = new IllegalStateException("文献检索提炼返回了无效 JSON", exception);
+            }
+        }
+        throw lastFailure;
     }
 
     /** 单次批量输出 DTO */

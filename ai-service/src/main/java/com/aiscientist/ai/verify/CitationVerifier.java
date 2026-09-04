@@ -54,6 +54,12 @@ public final class CitationVerifier {
         if (pmid != null) {
             return verifyPmid(pmid, raw);
         }
+        // 以 "url:" 开头的来源标识（url:doc-<sha256> / url:https://… / url:localdoc://…）：
+        // 直接本地四库反查，命中即视为真实（防虚构），未命中判 NOT_FOUND（疑似虚构），
+        // 不再因 extractUrl 正则只认 https/localdoc 而误判为 UNVERIFIABLE。
+        if (raw.startsWith("url:")) {
+            return verifySourceId(raw, raw);
+        }
         if (url != null) {
             return verifySourceId("url:" + url, raw);
         }

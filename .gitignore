@@ -8,6 +8,9 @@
 .env
 *.local
 
+# ===== 本机工具链（vendored Maven，勿提交）=====
+.tools/
+
 # ===== Java / Maven =====
 backend/target/
 ai-service/target/

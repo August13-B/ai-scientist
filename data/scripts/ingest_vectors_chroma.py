@@ -68,7 +68,18 @@ def extract_title(record: dict) -> str:
 
 # ==================== 主流程 ====================
 
-def ingest_one(client, collection_name: str, records: list[dict]) -> None:
+def batches(items, size: int):
+    batch = []
+    for item in items:
+        batch.append(item)
+        if len(batch) >= size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+
+
+def ingest_one(client, collection_name: str, records: list[dict], batch_size: int = 64) -> None:
     ids, documents, metadatas, embeddings = [], [], [], []
     skipped = 0
     for rec in records:
@@ -111,7 +122,12 @@ def ingest_one(client, collection_name: str, records: list[dict]) -> None:
         pass
     collection = client.get_or_create_collection(
         collection_name, metadata={"hnsw:space": "cosine"})
-    collection.add(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
+    # 一次性 add 全部向量会过大导致 Chroma 连接中断（broken pipe），故分批写入
+    for batch_ids, batch_emb, batch_doc, batch_meta in zip(
+        batches(ids, batch_size), batches(embeddings, batch_size),
+        batches(documents, batch_size), batches(metadatas, batch_size)):
+        collection.add(ids=batch_ids, embeddings=batch_emb,
+                       documents=batch_doc, metadatas=batch_meta)
     dims = set(len(e) for e in embeddings)
     if len(dims) > 1:
         print(f"  ❌ {collection_name}: 向量维度不一致 {dims}")
