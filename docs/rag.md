@@ -1,6 +1,6 @@
 # 四库 RAG 设计
 
-> 更新时间：2026-09-01（第二版）
+> 更新时间：2026-09-04（第三版）
 > 本文档固化设计原则、分工与**灌库实现契约**。向量化模型/分块策略/collection 命名已随灌库脚本落地；检索侧字段对齐见本文档第 5 节。
 
 > 🚨 **灌库字段级标准见 [docs/rag-field-standard.md](rag-field-standard.md)**（JSONL 输入/入库 metadata/title 等价/source_id 契约 + 校验脚本 validate_records.py）；字段定义冲突时以该标准为准并回改本文档。
@@ -11,10 +11,11 @@
 |---|---|---|
 | 四库灌库脚本 | ✅ **已实现** | `data/scripts/ingest_{papers,methods,datasets,evidence}.py` |
 | 灌库公共模块 | ✅ 已实现 | `data/scripts/rag_common.py`（连接+Embedding）、`rag_base.py`（基类） |
-| 向量化 | ✅ 已定为百炼 DashScope Embedding API | `EMBEDDING_PROVIDER=dashscope`，模型 `text-embedding-v3` |
+| 向量化 | ✅ 已定为百炼 DashScope Embedding API | `EMBEDDING_PROVIDER=dashscope`，模型 `text-embedding-v4`，单批最多 10 条 |
 | 向量库 | ✅ Chroma（开发）/ Milvus（生产）双支持 | `VECTOR_DB` 切换；docker-compose 已编排 |
-| 检索服务（RagSearchService） | ✅ **Chroma REST 已实现**；Milvus 待接入 | `ai-service` 的 `rag/RagSearchService.java`：query 经百炼 embedding 后查 Chroma `/api/v1/collections/{name}/query`，返回 `PaperEvidence` 契约 |
-| 数据源（raw/processed） | ⚠️ 待马梓涵产数据 | 按 JSONL 格式产出（见第 4 节） |
+| 检索服务（RagSearchService） | ✅ **Chroma v2 REST 已实现**；Milvus 待接入 | query 经百炼 embedding 后检索精选集合与 `*_vectors` 全文集合，配额融合后返回 `PaperEvidence` |
+| 精选四库数据 | ✅ 已入库 | papers=16、methods=14、datasets=6、evidence=18，共 54 条公开可引用来源 |
+| 上传全文向量 | ✅ 已校验并入库 | papers=2110、methods=1026、datasets=807、evidence=414，共 4357 条；模型 `text-embedding-v4`、1024 维 |
 
 > ⚠️ **协作注意**：Agent 接入时如需 RAG 检索，检索结果**直接返回 `PaperEvidence`**（RagSearchService 已按灌库 metadata 契约映射：`source_id`/`title`/`year`/`venue`/`authors` + 分块文本），无需再做 `convertValue`。Milvus 模式（`VECTOR_DB=milvus`）会抛明确提示，待丁贾峻接入 SDK。
 
@@ -33,7 +34,7 @@
 |---|---|---|
 | 向量数据库 | Milvus（生产）/ Chroma（开发） | `VECTOR_DB` 环境变量切换；Python SDK 已接入灌库脚本 |
 | 文档解析 | pdfplumber + Grobid | 学术 PDF 结构化：提取标题、摘要、章节、参考文献 |
-| 向量化模型 | **DashScope Embedding API**（text-embedding-v3） | 已定稿：灌库脚本通过百炼在线向量化，维度 1024（可配） |
+| 向量化模型 | **DashScope Embedding API**（text-embedding-v4） | 已定稿：灌库脚本通过百炼在线向量化，维度 1024（可配），单批最多 10 条 |
 | 分块策略 | 语义优先递归切分 | 优先段落、换行、句末、空格边界；`chunk_size=512, overlap=64`（脚本参数可覆盖） |
 | 检索策略 | 混合检索：向量相似度 + BM25 | 兼顾语义匹配与精确术语命中（当前实现为向量检索；BM25 混合检索待补） |
 
@@ -74,11 +75,12 @@
 ```
 
 - 检索结果附带来源元数据，供评估 Agent 做引用真实性核验
-- 论文库/证据库**必须包含来源标识**（source_id: doi:xxx / pmid:xxx / url:xxx）以支撑幻觉检测
+- 精选条目必须包含 `doi:` / `pmid:` / `url:https://...` 来源标识；上传全文分块使用 `url:localdoc://...`，保留源文件、页码、分块与哈希，供精确反查。
+- Java 检索按配额融合两个集合：精选来源保证最终报告可公开核验，上传全文向量提供更细的原文语义证据。
 
 ## 5. 向量化与分块约定
 
-- 向量化：百炼 DashScope Embedding API（`EMBEDDING_MODEL=text-embedding-v3`，维度 1024）
+- 向量化：百炼 DashScope Embedding API（`EMBEDDING_MODEL=text-embedding-v4`，维度 1024，单批最多 10 条）
 - 分块：`chunk_size=512, overlap=64`（灌库脚本 `--chunk-size/--chunk-overlap` 可覆盖）。切分器依次寻找空行段落、换行、中文/英文句末、空格边界，只有单个语义单元超长时才按字符截断。
 - 每个分块统一输出 `id`、`text`、`metadata`；其中 `metadata` 必含 `source_id`、`chunk_index`、`chunk_total`、`chunk_start`、`chunk_end`，并保留各库专有字段。
 - `id` 由 collection、`source_id`、分块序号和文本内容计算，重灌同一份数据时保持稳定；空值元数据会在写入前移除，复杂字段序列化为 JSON 字符串。
@@ -97,11 +99,15 @@
 
 collection 命名：`papers` / `methods` / `datasets` / `evidence`（脚本内常量，可 `--collection` 覆盖）。
 
+已计算向量的上传文件使用 `vectors/{papers,methods,datasets,evidence}.vectors.jsonl`，导入到独立集合
+`papers_vectors` / `methods_vectors` / `datasets_vectors` / `evidence_vectors`，不会覆盖精选四库。
+
 ## 7. 检索契约对齐（Agent 接入必读）
 
 - 灌库脚本写入的每条向量元数据包含 `source_id`、`text` 及各库专有字段（title/year/venue 等）
-- `ai-service` 的 `RagSearchService.search(knowledgeBase, query, topK)` 实现时，返回对象字段必须与 `PaperEvidence` 对齐：`title / content / doi / pmid / url / authors / year`（马艺萌代码用 `objectMapper.convertValue` 转换，字段名不匹配会转换失败）
+- `ai-service` 的 `RagSearchService.search(knowledgeBase, query, topK)` 返回对象字段与 `PaperEvidence` 对齐：`title / content / doi / pmid / url / authors / year / sourceId`。
 - 四库类型字符串：`"papers" / "methods" / "datasets" / "evidence"`
+- `GET /pipeline/rag/stats` 返回八个物理集合汇总后的四库统计；前端经 `GET /api/knowledge/stats` 展示。
 
 ## 8. 数据质量要求（马梓涵）
 

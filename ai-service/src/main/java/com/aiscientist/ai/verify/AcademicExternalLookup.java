@@ -107,6 +107,21 @@ public class AcademicExternalLookup implements ExternalLookup {
     }
 
     @Override
+    public Result findBySourceId(String sourceId) {
+        try {
+            for (String library : java.util.List.of("papers", "methods", "datasets", "evidence")) {
+                var matched = ragSearchService.findBySourceId(library, sourceId);
+                if (matched.isPresent()) {
+                    return Result.found(matched.get().title());
+                }
+            }
+            return Result.absent();
+        } catch (Exception e) {
+            return Result.error();
+        }
+    }
+
+    @Override
     public String findByTitle(String title) {
         try {
             // 复用团队统一 RAG：在论文库检索标题，返回命中的真实标题

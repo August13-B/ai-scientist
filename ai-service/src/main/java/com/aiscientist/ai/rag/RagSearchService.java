@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 四库 RAG 检索服务（Chroma REST 实现）。
@@ -44,6 +45,10 @@ public class RagSearchService {
     private static final String COLLECTIONS_PATH =
             "/api/v2/tenants/default_tenant/databases/default_database/collections";
     private static final String QUERY_PATH = COLLECTIONS_PATH + "/%s/query";
+    private static final String GET_PATH = COLLECTIONS_PATH + "/%s/get";
+    private static final String COUNT_PATH = COLLECTIONS_PATH + "/%s/count";
+    private static final List<String> KNOWLEDGE_BASES =
+            List.of("papers", "methods", "datasets", "evidence");
 
     /** 本地调试样例论文（水稻病害检测方向，DOI 均经 Crossref 实测 HTTP 200） */
     private static final List<PaperEvidence> MOCK_SAMPLES = List.of(
@@ -123,7 +128,124 @@ public class RagSearchService {
         if (embeddings.isEmpty()) {
             return List.of();
         }
-        return queryChroma(knowledgeBase, embeddings.get(0), topK);
+        List<PaperEvidence> curated = queryChroma(knowledgeBase, embeddings.get(0), topK);
+        List<PaperEvidence> uploaded = queryChromaIfPresent(
+                knowledgeBase + "_vectors", embeddings.get(0), topK);
+        return hybridMerge(curated, uploaded, topK);
+    }
+
+    /**
+     * 只检索带 DOI/HTTP URL 的人工精选集合。
+     * 实验设计的数据集白名单必须使用该入口，避免把论文里的普通 workload 片段
+     * 错当成可直接下载的数据集。
+     */
+    public List<PaperEvidence> searchCurated(String knowledgeBase, String query, int topK) {
+        if (mockSamples) {
+            int limit = Math.max(1, Math.min(topK, MOCK_SAMPLES.size()));
+            return List.copyOf(MOCK_SAMPLES.subList(0, limit));
+        }
+        if (!"chroma".equals(vectorDb)) {
+            if ("milvus".equals(vectorDb)) {
+                throw new UnsupportedOperationException(
+                        "VECTOR_DB=milvus 暂未接入（TODO 丁贾峻）：请先用 chroma 或实现 Milvus SDK 检索");
+            }
+            throw new IllegalStateException("未知 VECTOR_DB=" + vectorDb + "（支持 chroma | milvus）");
+        }
+        List<List<Double>> embeddings = bailianClient.embed(List.of(query));
+        return embeddings.isEmpty() ? List.of()
+                : queryChroma(knowledgeBase, embeddings.get(0), topK);
+    }
+
+    /**
+     * 返回四库的真实 Chroma 数据量，供知识库监测页面展示。
+     * curated 是带公开 DOI/PMID/URL 的精选条目，uploaded 是用户上传的全文向量分块。
+     */
+    public Map<String, Object> stats() {
+        if (!"chroma".equals(vectorDb)) {
+            throw new UnsupportedOperationException("知识库统计当前仅支持 Chroma");
+        }
+
+        Map<String, Object> libraries = new LinkedHashMap<>();
+        int grandTotal = 0;
+        for (String knowledgeBase : KNOWLEDGE_BASES) {
+            int curated = countCollectionIfPresent(knowledgeBase);
+            int uploaded = countCollectionIfPresent(knowledgeBase + "_vectors");
+            int total = curated + uploaded;
+            grandTotal += total;
+            libraries.put(knowledgeBase, Map.of(
+                    "curated", curated,
+                    "uploaded", uploaded,
+                    "total", total
+            ));
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", "ready");
+        result.put("mode", mockSamples ? "mock" : "production");
+        result.put("vectorDatabase", "Chroma");
+        result.put("embeddingModel", EMBEDDING_MODEL);
+        result.put("dimensions", 1024);
+        result.put("total", grandTotal);
+        result.put("libraries", libraries);
+        return Map.copyOf(result);
+    }
+
+    /**
+     * 按灌库时保存的 {@code source_id} 精确查找条目。
+     *
+     * <p>引用核验不能把 URL 当作自然语言做相似度检索，否则真实的官方论文页
+     * 也可能因为向量召回不稳定而被误判。这里使用 Chroma metadata where 条件
+     * 做确定性查询。</p>
+     */
+    public Optional<PaperEvidence> findBySourceId(String knowledgeBase, String sourceId) {
+        if (sourceId == null || sourceId.isBlank()) {
+            return Optional.empty();
+        }
+        if (mockSamples) {
+            return MOCK_SAMPLES.stream()
+                    .filter(paper -> sourceId.equalsIgnoreCase(paper.sourceId()))
+                    .findFirst();
+        }
+        if (!"chroma".equals(vectorDb)) {
+            return Optional.empty();
+        }
+
+        Optional<PaperEvidence> curated = findBySourceIdInCollection(knowledgeBase, sourceId);
+        if (curated.isPresent()) {
+            return curated;
+        }
+        return findBySourceIdInCollection(knowledgeBase + "_vectors", sourceId);
+    }
+
+    private Optional<PaperEvidence> findBySourceIdInCollection(String collection, String sourceId) {
+        String collectionId = findCollectionId(collection);
+        if (collectionId == null) {
+            return Optional.empty();
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("where", Map.of("source_id", Map.of("$eq", sourceId)));
+        body.put("limit", 1);
+        body.put("include", List.of("metadatas", "documents"));
+
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(chromaBaseUrl + String.format(GET_PATH, collectionId)))
+                    .timeout(timeout)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+                    .build();
+            HttpResponse<String> response = httpClient.send(
+                    request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new IllegalStateException("Chroma 精确查询失败 HTTP " + response.statusCode()
+                        + "：" + abbreviate(response.body()));
+            }
+            return toSinglePaperEvidence(objectMapper.readTree(response.body()));
+        } catch (IllegalStateException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IllegalStateException("Chroma 精确查询失败：" + exception.getMessage(), exception);
+        }
     }
 
     // ==================== 内部实现 ====================
@@ -131,6 +253,17 @@ public class RagSearchService {
     private List<PaperEvidence> queryChroma(String collection, List<Double> queryVector, int topK) {
         // Chroma v2：query 路径用 collection 的 id(UUID)，先按名字解析出 id
         String collectionId = resolveCollectionId(collection);
+        return queryChromaById(collectionId, queryVector, topK);
+    }
+
+    private List<PaperEvidence> queryChromaIfPresent(
+            String collection, List<Double> queryVector, int topK) {
+        String collectionId = findCollectionId(collection);
+        return collectionId == null ? List.of() : queryChromaById(collectionId, queryVector, topK);
+    }
+
+    private List<PaperEvidence> queryChromaById(
+            String collectionId, List<Double> queryVector, int topK) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("query_embeddings", List.of(queryVector));
         body.put("n_results", topK);
@@ -163,6 +296,14 @@ public class RagSearchService {
      * GET /api/v2/tenants/{t}/databases/{d}/collections 返回 [{id,name,...}]。
      */
     String resolveCollectionId(String name) {
+        String collectionId = findCollectionId(name);
+        if (collectionId == null) {
+            throw new IllegalStateException("Chroma 未找到集合：" + name + "（请先导入四库向量）");
+        }
+        return collectionId;
+    }
+
+    private String findCollectionId(String name) {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(chromaBaseUrl + COLLECTIONS_PATH))
@@ -183,12 +324,65 @@ public class RagSearchService {
                     return item.path("id").asText();
                 }
             }
-            throw new IllegalStateException("Chroma 未找到集合：" + name + "（请先导入四库向量）");
+            return null;
         } catch (IllegalStateException exception) {
             throw exception;
         } catch (Exception exception) {
             throw new IllegalStateException("Chroma 解析集合 id 失败：" + exception.getMessage(), exception);
         }
+    }
+
+    private int countCollectionIfPresent(String name) {
+        String collectionId = findCollectionId(name);
+        if (collectionId == null) {
+            return 0;
+        }
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(chromaBaseUrl + String.format(COUNT_PATH, collectionId)))
+                    .timeout(timeout)
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(
+                    request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new IllegalStateException("Chroma 统计集合失败 HTTP " + response.statusCode()
+                        + "：" + abbreviate(response.body()));
+            }
+            return objectMapper.readTree(response.body()).asInt();
+        } catch (IllegalStateException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IllegalStateException("Chroma 统计集合失败：" + exception.getMessage(), exception);
+        }
+    }
+
+    /** 精选来源与上传原文分块按配额混合，确保既有外部可引用来源，也用到全文细节。 */
+    static List<PaperEvidence> hybridMerge(
+            List<PaperEvidence> curated, List<PaperEvidence> uploaded, int topK) {
+        int limit = Math.max(1, topK);
+        List<PaperEvidence> left = curated == null ? List.of() : curated;
+        List<PaperEvidence> right = uploaded == null ? List.of() : uploaded;
+        if (right.isEmpty()) {
+            return List.copyOf(left.subList(0, Math.min(limit, left.size())));
+        }
+
+        int curatedQuota = Math.min(left.size(), Math.max(1, (limit + 1) / 2));
+        int uploadedQuota = Math.min(right.size(), limit - curatedQuota);
+        LinkedHashMap<String, PaperEvidence> merged = new LinkedHashMap<>();
+        left.stream().limit(curatedQuota).forEach(item -> merged.putIfAbsent(item.sourceId(), item));
+        right.stream().limit(uploadedQuota).forEach(item -> merged.putIfAbsent(item.sourceId(), item));
+        left.forEach(item -> {
+            if (merged.size() < limit) {
+                merged.putIfAbsent(item.sourceId(), item);
+            }
+        });
+        right.forEach(item -> {
+            if (merged.size() < limit) {
+                merged.putIfAbsent(item.sourceId(), item);
+            }
+        });
+        return List.copyOf(merged.values());
     }
 
     /**
@@ -221,6 +415,32 @@ public class RagSearchService {
             ));
         }
         return List.copyOf(papers);
+    }
+
+    /** Chroma get 响应使用一维 ids/metadatas/documents，与 query 的二维数组不同。 */
+    Optional<PaperEvidence> toSinglePaperEvidence(JsonNode collection) {
+        JsonNode ids = collection.path("ids");
+        if (!ids.isArray() || ids.isEmpty()) {
+            return Optional.empty();
+        }
+        JsonNode metadata = collection.path("metadatas").path(0);
+        String sourceId = metadata.path("source_id").asText("");
+        String title = metadata.path("title").asText("");
+        String content = collection.path("documents").path(0).asText("");
+        String authors = metadata.path("authors").asText("");
+        int year = metadata.path("year").isInt() ? metadata.path("year").asInt() : 0;
+        if (title.isBlank() || content.isBlank() || sourceId.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(new PaperEvidence(
+                title,
+                content,
+                splitAuthors(authors),
+                year == 0 ? null : year,
+                doiOf(sourceId),
+                pmidOf(sourceId),
+                urlOf(sourceId)
+        ));
     }
 
     /** source_id（doi:xxx / pmid:xxx / url:xxx）→ 原始 doi，其余返回 null */

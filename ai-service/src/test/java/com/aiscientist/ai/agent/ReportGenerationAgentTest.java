@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -37,7 +38,7 @@ class ReportGenerationAgentTest {
     @Test
     void generatesTenFieldReportFromAllAgents() {
         BailianClient bailian = mock(BailianClient.class);
-        when(bailian.chat(anyString(), anyString(), anyString())).thenReturn(VALID_REPORT);
+        when(bailian.chat(anyString(), anyString(), anyString(), anyInt())).thenReturn(VALID_REPORT);
         ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper(), false);
 
         ResearchPlan plan = agent.generate(context());
@@ -45,7 +46,7 @@ class ReportGenerationAgentTest {
         assertEquals("如何提升水稻病害模型泛化能力？", plan.problemStatement());
         assertEquals(1, plan.references().size());
         assertEquals("doi:10.21275/sr231218142714", plan.references().get(0));
-        assertTrue(plan.datasets().source().contains("PlantVillage"));
+        assertTrue(plan.datasets().source().stream().anyMatch(item -> item.contains("PlantVillage")));
         assertTrue(plan.experiments().baselines().contains("CNN"));
     }
 
@@ -53,7 +54,7 @@ class ReportGenerationAgentTest {
     void filtersReferencesOutsideWhitelist() {
         BailianClient bailian = mock(BailianClient.class);
         // LLM 引用了白名单外的 doi:10.1000/fake，应被过滤为白名单子集
-        when(bailian.chat(anyString(), anyString(), anyString()))
+        when(bailian.chat(anyString(), anyString(), anyString(), anyInt()))
                 .thenReturn(VALID_REPORT.replace("doi:10.21275/sr231218142714",
                         "doi:10.1000/fake"));
         ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper(), false);
@@ -67,7 +68,7 @@ class ReportGenerationAgentTest {
     @Test
     void fallsBackToWhitelistWhenReferencesMissing() {
         BailianClient bailian = mock(BailianClient.class);
-        when(bailian.chat(anyString(), anyString(), anyString()))
+        when(bailian.chat(anyString(), anyString(), anyString(), anyInt()))
                 .thenReturn(VALID_REPORT.replace("\"references\":[\"doi:10.21275/sr231218142714\"]",
                         "\"references\":[]"));
         ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper(), false);
@@ -81,7 +82,7 @@ class ReportGenerationAgentTest {
     void backfillsMissingFieldsFromStageProducts() {
         BailianClient bailian = mock(BailianClient.class);
         // rationale 为空 → 用 ④ bestHypothesis 的 rationale 兜底
-        when(bailian.chat(anyString(), anyString(), anyString()))
+        when(bailian.chat(anyString(), anyString(), anyString(), anyInt()))
                 .thenReturn(VALID_REPORT.replace("\"rationale\":\"多 Agent 协作得出：以迁移学习为中心，融合 ④ 推理与 ⑦ 辩论共识\"",
                         "\"rationale\":\"\""));
         ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper(), false);
@@ -94,7 +95,7 @@ class ReportGenerationAgentTest {
     @Test
     void rejectsMalformedModelJson() {
         BailianClient bailian = mock(BailianClient.class);
-        when(bailian.chat(anyString(), anyString(), anyString())).thenReturn("{not-json");
+        when(bailian.chat(anyString(), anyString(), anyString(), anyInt())).thenReturn("{not-json");
         ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper(), false);
 
         assertThrows(IllegalStateException.class, () -> agent.generate(context()));
@@ -102,10 +103,10 @@ class ReportGenerationAgentTest {
 
     @Test
     void productionModeLocksDatasetsFromRealSources() {
-        // 生产模式：datasets 不来自 LLM 编造，Source 锁定到⑥实验设计产物、Target 来自⑤核验引用
+        // 生产模式：datasets 不来自 LLM 编造，Source 锁定到⑥实验设计产物、Target 为确定性验证划分
         BailianClient bailian = mock(BailianClient.class);
         // dto 里 datasets 是编造的 "plantvillage-fake"，生产模式会被忽略
-        when(bailian.chat(anyString(), anyString(), anyString()))
+        when(bailian.chat(anyString(), anyString(), anyString(), anyInt()))
                 .thenReturn(VALID_REPORT.replace("\"source\":[\"PlantVillage\"]",
                         "\"source\":[\"fake-dataset\"]").replace("\"target\":[\"跨地区田间采集\"]",
                         "\"target\":[\"fake-target\"]"));
@@ -113,10 +114,65 @@ class ReportGenerationAgentTest {
 
         ResearchPlan plan = agent.generate(context());
 
-        // 生产锁定：source 取⑥产物（含 "PlantVillage"），忽略 dto 的 "fake-dataset"；target 来自⑤引用
-        assertTrue(plan.datasets().source().contains("PlantVillage"));
+        // 生产锁定：source 取⑥产物（含 "PlantVillage"），忽略 dto 的 "fake-dataset"；target 不得错误填论文引用
+        assertTrue(plan.datasets().source().stream().anyMatch(item -> item.contains("PlantVillage")));
         assertTrue(plan.datasets().source().stream().noneMatch(
                 item -> item.contains("fake-dataset")), "生产模式不应使用 LLM 编造的数据集名");
+        assertTrue(plan.datasets().target().stream().noneMatch(item -> item.startsWith("doi:")));
+        assertTrue(plan.datasets().target().stream().anyMatch(item -> item.contains("目标域")));
+    }
+
+    @Test
+    void rewritesCompletedExperimentClaimsAsProspectivePlan() {
+        BailianClient bailian = mock(BailianClient.class);
+        String response = VALID_REPORT
+                .replace("研究跨地区小样本水稻病害识别方法。", "实验设计验证了方法性能并显著优于基线。")
+                .replace("预期跨地区 F1 提升 5%-10%", "跨地区泛化能力得到验证");
+        when(bailian.chat(anyString(), anyString(), anyString(), anyInt())).thenReturn(response);
+        ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper(), false);
+
+        ResearchPlan plan = agent.generate(context());
+
+        assertTrue(plan.paperAbstract().contains("拟验证"));
+        assertTrue(plan.results().startsWith("预期"));
+        assertTrue(!plan.results().contains("得到验证"));
+        assertTrue(!plan.paperAbstract().contains("验证了"));
+        assertTrue(!plan.paperAbstract().contains("显著优于"));
+    }
+
+    @Test
+    void productionSsdReportUsesMeasurableDecisionCriterion() {
+        BailianClient bailian = mock(BailianClient.class);
+        when(bailian.chat(anyString(), anyString(), anyString(), anyInt())).thenReturn(VALID_REPORT);
+        ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper(), false);
+        PipelineContext ctx = context();
+        ctx.setQuestion("融合 SMART 与 NAND 特征进行 SSD 提前30天故障预测");
+
+        ResearchPlan plan = agent.generate(ctx);
+
+        assertTrue(plan.results().contains("召回率至少提升 5 个百分点"));
+        assertTrue(plan.results().contains("95% 置信区间"));
+        assertTrue(plan.results().contains("误报率不高于 5%"));
+        assertTrue(plan.results().startsWith("本研究尚未实施实验"));
+    }
+
+    @Test
+    void finalReferencesPreferPublicIdsOverLocalChunks() {
+        BailianClient bailian = mock(BailianClient.class);
+        String local = "url:localdoc://doc-abc/paper.pdf?library=papers&page=3&chunk=2&id=x";
+        when(bailian.chat(anyString(), anyString(), anyString(), anyInt())).thenReturn(
+                VALID_REPORT.replace("\"references\":[\"doi:10.21275/sr231218142714\"]",
+                        "\"references\":[\"" + local + "\"]"));
+        ReportGenerationAgent agent = new ReportGenerationAgent(bailian, new ObjectMapper(), false);
+        PipelineContext ctx = context();
+        ctx.setEvaluation(new PipelineModels.EvaluationResult(
+                ctx.getEvaluation().rankings(), List.of(),
+                List.of(local, "doi:10.21275/sr231218142714")));
+
+        ResearchPlan plan = agent.generate(ctx);
+
+        assertTrue(plan.references().contains("doi:10.21275/sr231218142714"));
+        assertTrue(plan.references().stream().noneMatch(item -> item.startsWith("url:localdoc:")));
     }
 
     // ==================== 工具：构造含 ①-⑦ 产物的 ctx ====================

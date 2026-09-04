@@ -2,6 +2,7 @@ package com.aiscientist.ai.pipeline;
 
 import com.aiscientist.ai.agent.KnowledgeDiscoveryModels.DiscoveryResult;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
@@ -56,13 +57,25 @@ final class ResearchPlanAssembler {
                 : new ResearchPlan.ExperimentPlan(experiment.baselines(), experiment.metrics());
 
         // 4. 数据集（数据引擎 + 评估）
-        ResearchPlan.DatasetPlan datasetPlan = new ResearchPlan.DatasetPlan(
-                List.of(PENDING), List.of(PENDING));
+        ResearchPlan.DatasetPlan datasetPlan = experiment == null
+                ? new ResearchPlan.DatasetPlan(List.of(PENDING), List.of(PENDING))
+                : new ResearchPlan.DatasetPlan(
+                        experiment.datasets(),
+                        List.of(
+                                "从 Source 按设备与型号隔离划分目标域测试集",
+                                "按时间先后构造独立测试窗口，避免未来信息泄漏"));
 
         // 10. 参考论文（⑤ 评估把关 / ③ 知识发现溯源），严禁虚构
-        List<String> references = kd != null && !kd.references().isEmpty()
-                ? kd.references()
-                : List.of(PENDING);
+        LinkedHashSet<String> referenceSet = new LinkedHashSet<>();
+        if (evaluation != null) {
+            referenceSet.addAll(evaluation.references());
+        }
+        if (kd != null) {
+            referenceSet.addAll(kd.references());
+        }
+        List<String> references = referenceSet.isEmpty()
+                ? List.of(PENDING)
+                : List.copyOf(referenceSet);
 
         return new ResearchPlan(
                 problemStatement,

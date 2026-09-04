@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -69,5 +70,19 @@ class EvaluationStageTest {
         PipelineContext ctx = ctxWithHypothesis(List.of("doi:10.1038/nature14539"));
         s.execute(ctx);
         org.junit.jupiter.api.Assertions.assertNotNull(ctx.getEvaluation());
+    }
+
+    @Test
+    void verifiedUrlKeepsUrlTypeInReferences() {
+        ExternalLookup lookup = mock(ExternalLookup.class);
+        String url = "https://www.usenix.org/conference/atc24/presentation/gu-yunfei";
+        when(lookup.findBySourceId("url:" + url))
+                .thenReturn(ExternalLookup.Result.found("APTN"));
+        EvaluationStage s = new EvaluationStage(new CitationVerifier(lookup), bailianClient, false);
+        PipelineContext ctx = ctxWithHypothesis(List.of("url:" + url));
+
+        s.execute(ctx);
+
+        assertEquals(List.of("url:" + url), ctx.getEvaluation().references());
     }
 }

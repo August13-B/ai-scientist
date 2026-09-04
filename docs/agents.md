@@ -250,9 +250,10 @@ trim。
 2. **提炼（动态路由）**：召回 ≤8 篇走单次批量（1 次 LLM 输出 keyFindings +
    citationChains）；>8 篇走两阶段——分组（≤5 篇/组）逐篇提炼 keyFindings →
    跨篇生成 citationChains，控制单次输入 token。
-3. **白名单校验**：每条 `KeyFinding(finding, evidenceIds)` / `CitationChain(chain,
-   evidenceIds)` 的 evidenceIds 必须 ∈ 召回 `sourceId`；keyFindings 须覆盖每一篇召回
-   文献（防漏篇与虚构）。输出经规范化重建触发 compact 构造器。
+3. **确定性补全与白名单校验**：每条 `KeyFinding(finding, evidenceIds)` /
+   `CitationChain(chain, evidenceIds)` 的 evidenceIds 必须 ∈ 召回 `sourceId`。模型偶发
+   漏掉某篇时，程序依据该篇标题和原文片段补入保守发现并绑定原始 sourceId，避免整条
+   管线因漏篇终止；白名单校验继续拦截虚构来源。
 
 `keyFindings` = 关键发现（绑定召回来源）；`citationChains` = 召回文献间**逻辑关联说明**
 （如方法传承/理论支撑/结论互补冲突，绑定召回来源），非字面引用关系（向量库不存引用图）。
@@ -274,10 +275,12 @@ methods/datasets 时改常量即可，检索/提炼/校验链路不变。
 
 **与单 Agent 直出的区别**：输入包含各环节的过程性推理——① 子查询/关键概念、② keyFindings/citationChains、③ researchGaps、④ reasoningChain、⑤ 评分/幻觉报告、⑥ 实验方案、⑦ 辩论纪要，据此生成一份**多 Agent 协作链路清晰**的《计划》（rationale 融入 ④ 推理与 ⑦ 辩论共识、results 融入 ⑥+⑦、references 走白名单）。
 
-**红线**：references 仅接受真实引用白名单（⑤ 核验通过的 `evaluation.references()` ∪ ③ 溯源 `knowledgeDiscovery.references()`），生成后逐字段校验，缺失/空时用对应阶段产物兜底；LLM 调用失败时 `ReportStage` 自动回退 `ResearchPlanAssembler`（纯 Java 拼接），保证报告永不空缺、管线不中断。
+**十维深度输出**：报告 Agent 使用 6500 tokens 的独立长文本预算。问题与科学依据按多段论证；技术手段 6—10 项；Source/Target 数据分别说明划分与用途；摘要保持学术结构；方法论 7—10 步；实验至少包含 4 项基线与 6 项指标；预期结果给出主要/次要终点、消融、稳健性、统计阈值、失败条件与备选策略。前端按 01—10 章节呈现，并提供目录、评分板、方法时间线、数据域卡片、引用直达核验与打印/PDF。
+
+**红线**：references 仅接受真实引用白名单（⑤ 核验通过的 `evaluation.references()` ∪ ③ 溯源 `knowledgeDiscovery.references()`）；摘要与结果会把“验证了/证明了/显著优于”等完成时陈述自动改写为计划语态。字段缺失时使用对应阶段产物兜底；LLM 调用失败时 `ReportStage` 自动回退 `ResearchPlanAssembler`，保证报告永不空缺、管线不中断。
 
 `PipelineEngine` 在 ⑦ 之后执行 REPORT 阶段；若 REPORT 未接入则引擎兜底 `ResearchPlanAssembler.assemble` 产出报告（保底不缺 10 字段）。
 
-对应测试 `ReportGenerationAgentTest`（5 例：10 字段生成/白名单过滤/缺 references 回退/字段缺失兜底/无效 JSON）与 `ReportStageTest`（2 例：ctx 生成/LLM 失败回退 assembler）。
+对应测试 `ReportGenerationAgentTest`（9 例：10 字段生成/白名单过滤/缺 references 回退/字段缺失兜底/无效 JSON/生产数据锁定/计划语态/SSD 判定阈值/公开引用优先）与 `ReportStageTest`（2 例：ctx 生成/LLM 失败回退 assembler）。
 
-> 2026-09-03：张睿实现。至此管线为 **八 Agent**（①-⑦ 原七 Agent + ⑧ 报告生成）。
+> 2026-09-04：报告 Agent 升级为十维长篇输出与比赛级可视化。管线为 **八 Agent**（①-⑦ 原七 Agent + ⑧ 报告生成）。

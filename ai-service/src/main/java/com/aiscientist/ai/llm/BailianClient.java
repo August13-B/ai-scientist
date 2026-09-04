@@ -82,10 +82,22 @@ public class BailianClient {
      * @return 模型回复文本
      */
     public String chat(String model, String systemPrompt, String userMessage) {
+        return chat(model, systemPrompt, userMessage, null);
+    }
+
+    /**
+     * 非流式长文本对话补全，可为报告等重任务单独设置输出 token 上限。
+     * 普通 Agent 继续使用三参数方法，不改变原有行为。
+     */
+    public String chat(String model, String systemPrompt, String userMessage,
+                       Integer maxTokens) {
         requireApiKey();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", resolveModel(model));
         body.put("temperature", temperature);
+        if (maxTokens != null && maxTokens > 0) {
+            body.put("max_tokens", maxTokens);
+        }
         body.put("messages", List.of(
                 Map.of("role", "system", "content", systemPrompt),
                 Map.of("role", "user", "content", userMessage)

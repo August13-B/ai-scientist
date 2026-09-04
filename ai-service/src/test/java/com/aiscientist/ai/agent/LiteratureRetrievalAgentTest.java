@@ -153,7 +153,7 @@ class LiteratureRetrievalAgentTest {
     // ==================== 白名单与覆盖校验 ====================
 
     @Test
-    void rejectsFindingsReferencingUnretrievedSources() {
+    void discardsChainThatOnlyReferencesUnretrievedSources() {
         BailianClient bailian = mock(BailianClient.class);
         RagSearchService rag = mock(RagSearchService.class);
         stubSearch(rag, "跨地区病害图像差异分析", List.of(p("p1"), p("p2")));
@@ -166,14 +166,46 @@ class LiteratureRetrievalAgentTest {
         LiteratureRetrievalAgent agent = new LiteratureRetrievalAgent(
                 bailian, rag, new ObjectMapper(), false);
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> agent.retrieve(QUERY));
+        LiteratureResult result = agent.retrieve(QUERY);
 
-        assertTrue(error.getMessage().contains("未提供的文献来源"));
+        assertTrue(result.citationChains().isEmpty());
+        assertTrue(result.keyFindings().stream()
+                .flatMap(item -> item.evidenceIds().stream())
+                .noneMatch(id -> id.contains("fake")));
     }
 
     @Test
-    void rejectsExtractionThatMissesAPaper() {
+    void removesFabricatedFindingAndCompletesFromRetrievedPapers() {
+        BailianClient bailian = mock(BailianClient.class);
+        RagSearchService rag = mock(RagSearchService.class);
+        stubSearch(rag, "跨地区病害图像差异分析", List.of(p("p1"), p("p2")));
+        stubSearch(rag, "小样本识别方法", List.of(p("p3"), p("p4")));
+        String json = """
+                {"keyFindings":[
+                  {"finding":"模型虚构的结论","evidenceIds":["doi:10.1000/fake"]},
+                  {"finding":"真实发现与混合引用","evidenceIds":["doi:10.1000/p1","doi:10.1000/fake"]}],
+                 "citationChains":[]}
+                """;
+        when(bailian.chat(anyString(), anyString(), anyString())).thenReturn(json);
+        LiteratureRetrievalAgent agent = new LiteratureRetrievalAgent(
+                bailian, rag, new ObjectMapper(), false);
+
+        LiteratureResult result = agent.retrieve(QUERY);
+
+        assertTrue(result.keyFindings().stream()
+                .noneMatch(item -> item.finding().contains("虚构")));
+        assertTrue(result.keyFindings().stream()
+                .flatMap(item -> item.evidenceIds().stream())
+                .noneMatch(id -> id.contains("fake")));
+        assertTrue(result.keyFindings().stream()
+                .flatMap(item -> item.evidenceIds().stream())
+                .collect(Collectors.toSet())
+                .containsAll(List.of("doi:10.1000/p1", "doi:10.1000/p2",
+                        "doi:10.1000/p3", "doi:10.1000/p4")));
+    }
+
+    @Test
+    void deterministicallyCompletesExtractionThatMissesAPaper() {
         BailianClient bailian = mock(BailianClient.class);
         RagSearchService rag = mock(RagSearchService.class);
         stubSearch(rag, "跨地区病害图像差异分析", List.of(p("p1"), p("p2")));
@@ -189,10 +221,13 @@ class LiteratureRetrievalAgentTest {
         LiteratureRetrievalAgent agent = new LiteratureRetrievalAgent(
                 bailian, rag, new ObjectMapper(), false);
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> agent.retrieve(QUERY));
+        LiteratureResult result = agent.retrieve(QUERY);
 
-        assertTrue(error.getMessage().contains("未覆盖全部召回文献"));
+        assertEquals(3, result.keyFindings().size());
+        assertTrue(result.keyFindings().stream()
+                .anyMatch(item -> item.evidenceIds().contains("doi:10.1000/p4")));
+        assertTrue(result.keyFindings().stream()
+                .anyMatch(item -> item.finding().contains("论文 p4")));
     }
 
     @Test

@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
  *   <li>{@code POST /pipeline/{runId}/resume} 人在回路恢复（提交审阅意见）</li>
  *   <li>{@code GET /pipeline/{runId}/state} 查询当前管线状态</li>
  *   <li>{@code POST /rag/search} 四库混合检索（Agent 内部 / 直连接口）</li>
+ *   <li>{@code GET /rag/stats} 四库向量数据量与运行状态</li>
  * </ul>
  */
 @RestController
@@ -237,6 +238,12 @@ public class PipelineController {
             @RequestBody RagSearchRequest request
     ) {
         return ragSearchService.search(request.knowledgeBase(), request.query(), request.topK());
+    }
+
+    /** 四库 Chroma 真实数据量与向量配置。 */
+    @GetMapping("/rag/stats")
+    public Map<String, Object> ragStats() {
+        return ragSearchService.stats();
     }
 
     /** RAG 检索请求体 */
