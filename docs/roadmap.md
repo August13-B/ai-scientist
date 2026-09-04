@@ -23,15 +23,15 @@
 - [x] **SSE 事件**：`SseEventPublisher` 历史重放 + `GET /pipeline/{runId}/stream`
 - [x] **BailianClient 真实现**：百炼 OpenAI 兼容 API、60s 超时重试、模型分级路由、embed 接口（streamChat 待丁贾峻）
 - [x] **RagSearchService Chroma REST**：检索返回 PaperEvidence 契约（Milvus 待接入）
-- [ ] 科研方向最终确认（暂定：深度学习 × SSD 存储）
+- [x] 科研方向确认：通用领域科学假设生成（代表案例 = SSD 存储）
 - [ ] 百炼平台注册与 API Key（丁贾峻、马梓涵）；agent.thinking token 流（streamChat）
-- [ ] 队友接入：②④⑤⑥⑦ Agent + backend 转发 + 前端 SSE 对接
+- [x] 八 Agent 全链路接入（①-⑧）+ backend 转发 + 前端 SSE 对接
 
 ## 3. 关键风险与行动项
 
 | 风险/事项 | 负责 | 行动 |
 |---|---|---|
-| 科研方向未定 | 全体 | 尽快开会确定，直接决定文献库构建方向 |
+| 通用领域定位 | 全体 | 已确认为通用领域；按领域更换知识库与提示词，代表案例=SSD |
 | 百炼凭证与调用日志 | 丁贾峻 | 赛题强制要求，技术文档必须体现 |
 | 幻觉检测质量关卡 | 钱思妤 | 参考论文严禁虚构，逐条反向比对 |
 | 数据清洗质量 | 马梓涵 | 系统「源头活水」，决定 Agent 输出水平 |

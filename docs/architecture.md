@@ -23,7 +23,7 @@
                            │ 内部 HTTP（REST + SSE）
 ┌──────────────────────────▼─────────────────────────────────┐
 │  多智能体服务层  ai-service/（Spring Boot + LangChain4j）    │
-│  · 七 Agent DAG 管线（State 状态流转）                      │
+│  · 八 Agent DAG 管线（State 状态流转）                      │
 │  · @Tool / @AiService 定义                                  │
 │  · 百炼平台 Qwen 模型调用封装                               │
 │  · 四库 RAG 检索接口                                        │
@@ -45,7 +45,7 @@
 用户提问
   → 前端 POST /api/tasks（提交科研问题 + 参数）
   → 业务后端创建任务记录，转发至 ai-service POST /pipeline/run
-  → ai-service 执行七 Agent 管线，实时推送 Agent 状态事件（SSE）
+  → ai-service 执行八 Agent 管线，实时推送 Agent 状态事件（SSE）
   → 业务后端转发 SSE 事件流给前端
   → 前端 Vue Flow 动态渲染思维链；在「人在回路暂停点」等待人类介入
   → 人类审阅/修改后继续 → 管线继续执行

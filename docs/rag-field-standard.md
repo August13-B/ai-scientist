@@ -132,9 +132,9 @@
 
 | 库 | `title` 取值规则（MUST） | 示例 |
 |---|---|---|
-| `papers` | 直接取 `title` | `"SSD 寿命预测综述"` |
+| `papers` | 直接取 `title` | `"机器学习综述"` |
 | `methods` | `title = method_name` | `"混合效应模型"` |
-| `datasets` | `title = name` | `"阿里云 SSD 公开数据集"` |
+| `datasets` | `title = name` | `"公开医学影像数据集"` |
 | `evidence` | `title = f"{subject} {predicate} {object}"` | `"睡眠波动 正相关于 压力评分"` |
 
 落地位置：各 `ingest_*.py` 的 `parse_record()` 构造 metadata 处补一行即可（预计每库 1 行）。

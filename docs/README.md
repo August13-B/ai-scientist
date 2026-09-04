@@ -5,7 +5,7 @@
 | 文档 | 内容 | 读者 |
 |---|---|---|
 | [architecture.md](architecture.md) | 系统架构设计：四层结构、通信链路、部署拓扑 | 全体成员 |
-| [agents.md](agents.md) | 七 Agent 管线：DAG 状态流转、数据流、输出字段对照 | 智能体组 |
+| [agents.md](agents.md) | 八 Agent 管线：DAG 状态流转、数据流、输出字段对照 | 智能体组 |
 | [rag.md](rag.md) | 四库 RAG：论文/方法/数据/证据库、向量化、检索策略 | 数据引擎组 |
 | [tech-plan.md](tech-plan.md) | 赛题技术方案（对标提交 PDF，整理后导出） | 全体成员 |
 | [api-design.md](api-design.md) | 接口清单（请求/响应字段由后端组设计时确定） | 前后端组 |
