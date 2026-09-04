@@ -231,7 +231,7 @@ class LiteratureRetrievalAgentTest {
     }
 
     @Test
-    void rejectsMalformedModelJson() {
+    void malformedModelJsonFallsBackToDeterministicFindings() {
         BailianClient bailian = mock(BailianClient.class);
         RagSearchService rag = mock(RagSearchService.class);
         stubSearch(rag, "跨地区病害图像差异分析", List.of(p("p1"), p("p2")));
@@ -240,7 +240,16 @@ class LiteratureRetrievalAgentTest {
         LiteratureRetrievalAgent agent = new LiteratureRetrievalAgent(
                 bailian, rag, new ObjectMapper(), false);
 
-        assertThrows(IllegalStateException.class, () -> agent.retrieve(QUERY));
+        // 生产模式：LLM 反复返回无效 JSON 时不再中断，而是确定性回退到逐篇保守补全，
+        // 仍产出可溯源发现（覆盖全部召回文献），保证文献检索不因模型抖动中断。
+        LiteratureResult result = agent.retrieve(QUERY);
+        assertEquals(4, result.papers().size());
+        assertEquals(4, result.keyFindings().size(), "回退补全需覆盖全部召回文献");
+        assertTrue(result.keyFindings().stream()
+                .flatMap(f -> f.evidenceIds().stream())
+                .collect(Collectors.toSet())
+                .containsAll(List.of("doi:10.1000/p1", "doi:10.1000/p2",
+                        "doi:10.1000/p3", "doi:10.1000/p4")));
     }
 
     @Test

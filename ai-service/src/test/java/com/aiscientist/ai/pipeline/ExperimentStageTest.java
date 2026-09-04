@@ -112,8 +112,8 @@ class ExperimentStageTest {
 
         assertThat(context.getExperiment().datasets())
                 .containsExactly(
-                        "Alibaba SSD SMART Logs (https://github.com/alibaba-edu/dcbrain/tree/master/ssd_smart_logs)",
-                        "Alibaba SSD Open Data (https://github.com/alibaba-edu/dcbrain/tree/master/ssd_open_data)");
+                        "Alibaba SSD SMART Logs (url:https://github.com/alibaba-edu/dcbrain/tree/master/ssd_smart_logs)",
+                        "Alibaba SSD Open Data (url:https://github.com/alibaba-edu/dcbrain/tree/master/ssd_open_data)");
     }
     private PipelineContext contextWithEvaluation() {
         PipelineContext context = new PipelineContext();

@@ -99,7 +99,7 @@ public class ExperimentStage implements PipelineAgent {
             return generated;
         }
         List<String> traceableDatasets = datasetCandidates.stream()
-                .map(item -> item.title() + " (" + item.url() + ")")
+                .map(item -> item.title() + " (" + item.sourceId() + ")")
                 .distinct()
                 .toList();
         return new GeneratedExperimentContent(
@@ -119,9 +119,10 @@ public class ExperimentStage implements PipelineAgent {
                 throw new IllegalStateException(
                         "Each experiment dataset must include a name: " + dataset);
             }
-            // 生产：具体数据集必须可溯源 URL（符合引用可溯源红线）；
+            // 生产：具体数据集必须可溯源（http/https 的 URL，或 url: 开头的来源标识，含 url:doc-<sha256>）；
             // 调试模式：允许「数据集选择标准」描述（与 BailianExperimentPlanGenerator 提示词第 2 条一致）
-            if (!mockSamples && !(dataset.contains("https://") || dataset.contains("http://"))) {
+            if (!mockSamples && !(dataset.contains("https://") || dataset.contains("http://")
+                    || dataset.contains("url:") || dataset.contains("localdoc://"))) {
                 throw new IllegalStateException(
                         "Each experiment dataset must include a name and traceable URL: " + dataset);
             }
@@ -152,6 +153,11 @@ public class ExperimentStage implements PipelineAgent {
         String arxiv = CitationVerifier.extractArxiv(normalized);
         if (url.isBlank() && arxiv != null) {
             url = "https://arxiv.org/abs/" + arxiv;
+        }
+        // url:doc-<sha256> 等本地来源标识：extractUrl 正则只认 http/localdoc，不识别；
+        // 但它们来自已灌库的真实来源，直接以完整 source_id 作为可溯源 URL，避免误判 Untraceable。
+        if (url.isBlank() && normalized.startsWith("url:")) {
+            url = normalized;
         }
         if (doi.isBlank() && pmid.isBlank() && url.isBlank()) {
             throw new IllegalStateException("Untraceable experiment reference: " + normalized);
