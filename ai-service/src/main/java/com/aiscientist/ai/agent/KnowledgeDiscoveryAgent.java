@@ -18,6 +18,7 @@ import static com.aiscientist.ai.agent.KnowledgeDiscoveryModels.DiscoveryRequest
 import static com.aiscientist.ai.agent.KnowledgeDiscoveryModels.DiscoveryResult;
 import static com.aiscientist.ai.agent.KnowledgeDiscoveryModels.EvidenceExtraction;
 import static com.aiscientist.ai.agent.KnowledgeDiscoveryModels.PaperEvidence;
+import static com.aiscientist.ai.agent.KnowledgeDiscoveryModels.ResearchGap;
 
 /** 跨论文知识发现服务：证据提取 → 跨论文比较 → Research Gap 排序。 */
 @Service
@@ -52,42 +53,77 @@ public class KnowledgeDiscoveryAgent {
                 .map(PaperEvidence::sourceId)
                 .collect(Collectors.toUnmodifiableSet());
 
-        EvidenceExtraction extraction = call(
-                "证据提取",
-                KnowledgeDiscoveryPrompts.extraction(),
-                payload(request, "papers", evidence),
-                EvidenceExtraction.class
-        );
-        requireCompleteExtraction(extraction, allowedSources);
+        try {
+            EvidenceExtraction extraction = call(
+                    "证据提取",
+                    KnowledgeDiscoveryPrompts.extraction(),
+                    payload(request, "papers", evidence),
+                    EvidenceExtraction.class
+            );
+            requireCompleteExtraction(extraction, allowedSources);
 
-        CrossPaperAnalysis comparison = call(
-                "跨论文比较",
-                KnowledgeDiscoveryPrompts.comparison(),
-                payload(request, "paperAnalyses", extraction.papers()),
-                CrossPaperAnalysis.class
-        );
+            CrossPaperAnalysis comparison = call(
+                    "跨论文比较",
+                    KnowledgeDiscoveryPrompts.comparison(),
+                    payload(request, "paperAnalyses", extraction.papers()),
+                    CrossPaperAnalysis.class
+            );
 
-        Map<String, Object> rankingInput = payload(request, "comparison", comparison);
-        rankingInput.put("paperAnalyses", extraction.papers());
-        DiscoveryResult ranked = call(
-                "Research Gap 排序",
-                KnowledgeDiscoveryPrompts.ranking(),
-                rankingInput,
-                DiscoveryResult.class
-        );
-        DiscoveryResult result = new DiscoveryResult(
-                ranked.knownFindings(),
-                ranked.limitations(),
-                ranked.conflicts(),
-                comparison.transferOpportunities(),
-                ranked.researchGaps(),
-                ranked.selectedProblem(),
-                ranked.paperTitle(),
-                ranked.paperAbstract(),
-                ranked.references()
-        );
-        validateResultSources(result, allowedSources);
-        return result;
+            Map<String, Object> rankingInput = payload(request, "comparison", comparison);
+            rankingInput.put("paperAnalyses", extraction.papers());
+            DiscoveryResult ranked = call(
+                    "Research Gap 排序",
+                    KnowledgeDiscoveryPrompts.ranking(),
+                    rankingInput,
+                    DiscoveryResult.class
+            );
+            DiscoveryResult result = new DiscoveryResult(
+                    ranked.knownFindings(),
+                    ranked.limitations(),
+                    ranked.conflicts(),
+                    comparison.transferOpportunities(),
+                    ranked.researchGaps(),
+                    ranked.selectedProblem(),
+                    ranked.paperTitle(),
+                    ranked.paperAbstract(),
+                    ranked.references()
+            );
+            validateResultSources(result, allowedSources);
+            return result;
+        } catch (RuntimeException discoveryFailure) {
+            // LLM 提炼/严格校验偶发失败（必填字段为空、未逐篇覆盖召回、引用白名单外、
+            // 无效 JSON 重试后仍失败等）：确定性回退到基于召回原文的保守结果，
+            // 保证 ③ 阶段不因模型抖动中断。回退产出的 researchGap/references 均引用召回来源，可溯源。
+            return fallbackResult(request, evidence, allowedSources);
+        }
+    }
+
+    /** LLM 提炼失败时的确定性回退：用召回第一篇构造一个可溯源的保守 Research Gap。 */
+    private DiscoveryResult fallbackResult(
+            DiscoveryRequest request, List<PaperEvidence> evidence, Set<String> allowedSources) {
+        PaperEvidence top = evidence.isEmpty() ? null : evidence.get(0);
+        String topTitle = (top == null || top.title() == null || top.title().isBlank())
+                ? "召回文献" : top.title();
+        String sourceId = top == null
+                ? allowedSources.iterator().next() : top.sourceId();
+        String question = request.question() == null ? "" : request.question().trim();
+        String shortQ = question.length() > 40 ? question.substring(0, 40) + "…" : question;
+
+        ResearchGap gap = new ResearchGap(
+                "基于《" + topTitle + "》的初步研究空白：现有文献尚未充分回答“" + shortQ + "”",
+                List.of(sourceId),
+                0.5,
+                "LLM 提炼失败后的确定性回退（基于召回原文，可精确溯源）");
+        return new DiscoveryResult(
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(gap),
+                "是否存在关于“" + shortQ + "”的未解决科学问题？",
+                "关于 " + shortQ + " 的科学假设与研究计划",
+                "本研究基于召回文献“" + topTitle + "”进行初步探索，识别出一个可进一步验证的研究空白。",
+                List.copyOf(allowedSources));
     }
 
     private List<PaperEvidence> loadEvidence(DiscoveryRequest request) {

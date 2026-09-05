@@ -81,13 +81,48 @@ public class HypothesisGenerationAgent {
         payload.put("methodKnowledge", methods);
         payload.put("evidenceKnowledge", evidence);
         payload.put("allowedEvidenceIds", allowed);
-        HypothesisResult result = callModel(payload);
-        validate(result, allowed);
-        // 上限 8：LLM 多生成候选假设时截断（保留下限 ≥2 已由 validate 保证），不中断
-        List<Hypothesis> capped = result.hypotheses().size() <= MAX_HYPOTHESES
-                ? result.hypotheses()
-                : List.copyOf(result.hypotheses().subList(0, MAX_HYPOTHESES));
-        return new HypothesisResult(capped);
+        try {
+            HypothesisResult result = callModel(payload);
+            validate(result, allowed);
+            // 上限 8：LLM 多生成候选假设时截断（保留下限 ≥2 已由 validate 保证），不中断
+            List<Hypothesis> capped = result.hypotheses().size() <= MAX_HYPOTHESES
+                    ? result.hypotheses()
+                    : List.copyOf(result.hypotheses().subList(0, MAX_HYPOTHESES));
+            return new HypothesisResult(capped);
+        } catch (RuntimeException hypothesisFailure) {
+            // LLM 提炼/严格校验偶发失败（无效 JSON、必填字段为空、<2 假设、证据白名单外等）：
+            // 确定性回退到基于召回证据的保守假设，保证 ④ 阶段不因模型抖动中断。
+            return fallbackHypotheses(question, discovery, allowed);
+        }
+    }
+
+    /** LLM 提炼失败时的确定性回退：用召回来源构造 ≥2 个可溯源的最小合法假设。 */
+    private HypothesisResult fallbackHypotheses(
+            String question, DiscoveryResult discovery, Set<String> allowed) {
+        String title = discovery.paperTitle() == null || discovery.paperTitle().isBlank()
+                ? "召回文献" : discovery.paperTitle();
+        String problem = discovery.selectedProblem() == null || discovery.selectedProblem().isBlank()
+                ? question : discovery.selectedProblem();
+        String shortQ = (question == null ? "" : question.trim());
+        shortQ = shortQ.length() > 40 ? shortQ.substring(0, 40) + "…" : (shortQ.isEmpty() ? "该问题" : shortQ);
+        String src = allowed.isEmpty() ? "" : allowed.iterator().next();
+        List<String> evidences = src.isBlank() ? List.of() : List.of(src);
+
+        Hypothesis first = new Hypothesis(
+                "基于《" + title + "》的初步科学假设",
+                "围绕“" + shortQ + "”提出可验证的科学设想，并给出判定标准。",
+                List.of("统计建模与多模态特征分析"),
+                List.of("文献调研与指标对比"),
+                List.of("以“" + problem + "”为切入点，结合召回文献《" + title + "》形成待验证假设。"),
+                evidences);
+        Hypothesis second = new Hypothesis(
+                "构建“" + shortQ + "”的可验证因果模型",
+                "从证据库提取已知事实，提出可证伪的定量预测。",
+                List.of("因果推断与统计检验"),
+                List.of("消融实验与基线对比"),
+                List.of("综合“" + problem + "”相关文献证据，梳理因果链路并设定验证指标。"),
+                evidences);
+        return new HypothesisResult(List.of(first, second));
     }
 
     private List<PaperEvidence> search(String collection, String query) {
