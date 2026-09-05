@@ -79,6 +79,19 @@ def start_run(base, question):
     return run_id
 
 
+def fetch_failure_detail(base, run_id):
+    """取管线 trace 中失败阶段的 errorMessage（内层真正原因，外层只是“阶段 XX 执行失败”）。"""
+    try:
+        data = http_get_json(f"{base}/pipeline/{run_id}/trace")
+        if isinstance(data, list):
+            for rec in data:
+                if isinstance(rec, dict) and rec.get("status") == "FAILED" and rec.get("errorMessage"):
+                    return rec["errorMessage"]
+    except Exception:
+        pass
+    return None
+
+
 def resume_run(base, run_id):
     """自动通过人在回路暂停点。
 
@@ -150,8 +163,10 @@ def run_one(base, question, timeout_sec, index=None):
                     return False, "pipeline.done 事件缺少 report"
                 return True, report
             elif event == "pipeline.error":
-                msg = _parse_event(data).get("message", "管线错误")
-                return False, str(msg)
+                msg = str(_parse_event(data).get("message", "管线错误"))
+                rid = _parse_event(data).get("runId") or run_id
+                detail = fetch_failure_detail(base, rid)
+                return False, (detail if detail else msg)
             elif event == "__error__":
                 # SSE 读取层异常：若非超时则报错，否则继续等（由外层超时兜底）
                 if "timed out" in str(data).lower() or "timeout" in str(data).lower():
@@ -242,6 +257,46 @@ def load_questions(path):
     return items
 
 
+def parse_failed_indices(summary_md):
+    """解析上次 _汇总.md，返回失败题的 index 集合（❌ 行）。"""
+    failed = set()
+    for line in summary_md.splitlines():
+        m = re.match(r"^\- ❌ 第 (\d+) 题", line.strip())
+        if m:
+            failed.add(int(m.group(1)))
+    return failed
+
+
+def parse_summary_state(summary_md):
+    """解析 _汇总.md 为 {index: {"ok": bool, "question": str}}，用于合并全量最新状态。"""
+    state = {}
+    for line in summary_md.splitlines():
+        m = re.match(r"^\- (✅|❌) 第 (\d+) 题：(.+)$", line.strip())
+        if m:
+            ok = m.group(1) == "✅"
+            state[int(m.group(2))] = {"ok": ok, "question": m.group(3).strip()}
+    return state
+
+
+def latest_summary(out_dir: Path):
+    """返回输出目录里【最新】的汇总文件：优先带时间戳的 _汇总_*.md（mtime 最新），回退 _汇总.md。"""
+    candidates = []
+    if out_dir.exists():
+        for p in out_dir.glob(f"{SUMMARY_NAME.rsplit('.', 1)[0]}_*.md"):
+            candidates.append(p)
+        plain = out_dir / SUMMARY_NAME
+        if plain.exists():
+            candidates.append(plain)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def timestamp():
+    """当前时间戳（用于汇总文件名），如 20260905_1230。"""
+    return time.strftime("%Y%m%d_%H%M")
+
+
 def main():
     parser = argparse.ArgumentParser(description="批量科研问题自动跑题（直连 ai-service，不启动服务）")
     parser.add_argument("--input", default="125问题_第一组.json", help="问题 JSON 路径")
@@ -251,11 +306,28 @@ def main():
                         help="单题超时（分钟，默认 10）")
     parser.add_argument("--base", default=DEFAULT_BASE, help="ai-service 地址（默认 8081）")
     parser.add_argument("--limit", type=int, default=None, help="只跑前 N 题（用于试跑）")
+    parser.add_argument("--retry-failed", type=str, default=None,
+                        help="只重跑上次汇总(_汇总.md)中失败的题；值为上次输出目录路径")
     args = parser.parse_args()
 
     check_service(args.base)
 
     items = load_questions(args.input)
+
+    # —— 只重跑失败的：优先读【最新】带时间戳汇总（反映最近一次运行），否则读 _汇总.md ——
+    retry_failed = set()
+    if args.retry_failed:
+        summary_path = latest_summary(Path(args.retry_failed))
+        if not summary_path:
+            print(f"[error] 未找到上次汇总（{Path(args.retry_failed)} 下无 _汇总.md / _汇总_*.md），无法识别失败题")
+            sys.exit(1)
+        retry_failed = parse_failed_indices(summary_path.read_text(encoding="utf-8"))
+        if not retry_failed:
+            print("[info] 上次汇总无失败题，无需重跑")
+            sys.exit(0)
+        items = [it for it in items if it["index"] in retry_failed]
+        print(f"[retry] 读取 {summary_path.name}：上次失败 {len(retry_failed)} 题，本次只重跑这些")
+
     if args.limit:
         items = items[:args.limit]
     if not items:
@@ -290,26 +362,56 @@ def main():
     # 按 index 排序
     results.sort(key=lambda r: r["index"])
 
-    # 写 MD + 汇总
+    # 写 MD + 汇总（_汇总.md 始终为全量最新状态；_汇总_<时间戳>.md 为本次重跑历史）
     ok_count = 0
-    summary_lines = ["# 跑题结果汇总", "",
-                     f"- 输入：{args.input}", f"- 并发：{args.workers}", f"- 单题超时：{args.timeout} 分钟",
-                     f"- ai-service：{args.base}", ""]
+    # 重跑模式下：先读旧 _汇总.md 里「非本次重跑」的成功题，合并为全量最新
+    merged = {}  # index -> {ok, question}
+    if args.retry_failed:
+        old_summary = Path(args.out) / SUMMARY_NAME
+        if old_summary.exists():
+            merged = parse_summary_state(old_summary.read_text(encoding="utf-8"))
+        # 本次重跑的题覆盖旧状态
+        for r in results:
+            merged[r["index"]] = {"ok": r["ok"], "question": r["question"]}
+    else:
+        for r in results:
+            merged[r["index"]] = {"ok": r["ok"], "question": r["question"]}
+
+    # 写 MD（本次重跑成功的题）+ 更新全量状态
     for r in results:
         if r["ok"]:
             ok_count += 1
             fname = f"{r['index']}_{safe_name(r['question'])}.md"
             (out_dir / fname).write_text(
                 render_markdown(r["detail"], r["question"]), encoding="utf-8")
-            summary_lines.append(f"- ✅ 第 {r['index']} 题：{r['question']}")
+
+    # 全量最新状态 -> _汇总.md
+    full_lines = ["# 跑题结果汇总（全量最新状态）", "",
+                  f"- 输入：{args.input}", f"- 并发：{args.workers}", f"- 单题超时：{args.timeout} 分钟",
+                  f"- ai-service：{args.base}", f"- 最近更新：{time.strftime('%Y-%m-%d %H:%M')}", ""]
+    for idx in sorted(merged):
+        st = merged[idx]
+        line = f"- ✅ 第 {idx} 题：{st['question']}" if st["ok"] else f"- ❌ 第 {idx} 题：{st['question']} —— （待重跑/失败）"
+        full_lines.append(line)
+    full_ok = sum(1 for st in merged.values() if st["ok"])
+    full_lines += ["", f"**成功 {full_ok}/{len(merged)}，失败 {len(merged) - full_ok}**"]
+    (out_dir / SUMMARY_NAME).write_text("\n".join(full_lines) + "\n", encoding="utf-8")
+
+    # 本次重跑历史 -> _汇总_<时间戳>.md
+    hist_lines = ["# 跑题结果汇总（本次重跑）", "",
+                  f"- 输入：{args.input}", f"- 时间：{time.strftime('%Y-%m-%d %H:%M')}", ""]
+    for r in results:
+        if r["ok"]:
+            hist_lines.append(f"- ✅ 第 {r['index']} 题：{r['question']}")
         else:
-            summary_lines.append(f"- ❌ 第 {r['index']} 题：{r['question']} —— {r['detail']}")
+            hist_lines.append(f"- ❌ 第 {r['index']} 题：{r['question']} —— {r['detail']}")
+    hist_lines += ["", f"**本次成功 {ok_count}/{len(results)}，失败 {len(results) - ok_count}**"]
+    hist_name = f"{SUMMARY_NAME.rsplit('.', 1)[0]}_{timestamp()}.md"
+    (out_dir / hist_name).write_text("\n".join(hist_lines) + "\n", encoding="utf-8")
 
-    summary_lines += ["", f"**成功 {ok_count}/{len(results)}，失败 {len(results) - ok_count}**"]
-    (out_dir / SUMMARY_NAME).write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
-
-    print(f"\n[run] 完成：成功 {ok_count}/{len(results)}，失败 {len(results) - ok_count}")
-    print(f"[run] 汇总：{out_dir / SUMMARY_NAME}")
+    print(f"\n[run] 完成：本次成功 {ok_count}/{len(results)}，失败 {len(results) - ok_count}")
+    print(f"[run] 全量汇总：{out_dir / SUMMARY_NAME}")
+    print(f"[run] 本次历史：{out_dir / hist_name}")
     print(f"[run] MD：{out_dir}")
 
 
