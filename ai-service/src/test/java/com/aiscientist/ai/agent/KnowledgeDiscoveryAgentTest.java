@@ -11,7 +11,10 @@ import java.util.List;
 import static com.aiscientist.ai.agent.KnowledgeDiscoveryModels.DiscoveryRequest;
 import static com.aiscientist.ai.agent.KnowledgeDiscoveryModels.DiscoveryResult;
 import static com.aiscientist.ai.agent.KnowledgeDiscoveryModels.PaperEvidence;
+import static com.aiscientist.ai.agent.KnowledgeDiscoveryModels.ResearchGap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -140,6 +143,15 @@ class KnowledgeDiscoveryAgentTest {
         verifyNoInteractions(bailian, rag);
     }
 
+    /** 校验失败时已改为确定性回退：必须返回合法结果（含 Gap 且 references 覆盖其证据）。 */
+    private static void assertFallbackValid(DiscoveryResult result) {
+        assertNotNull(result);
+        assertFalse(result.researchGaps().isEmpty());
+        ResearchGap gap = result.researchGaps().get(0);
+        assertFalse(gap.evidenceIds().isEmpty());
+        assertTrue(result.references().containsAll(gap.evidenceIds()));
+    }
+
     @Test
     void reportsTheStageForMalformedModelJson() {
         BailianClient bailian = mock(BailianClient.class);
@@ -148,10 +160,8 @@ class KnowledgeDiscoveryAgentTest {
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
                 bailian, rag, new ObjectMapper(), false);
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> agent.discover(requestWithEvidence()));
-
-        assertTrue(error.getMessage().contains("证据提取"));
+        // 严格校验/解析失败改为确定性回退：返回合法结果而非中断
+        assertFallbackValid(agent.discover(requestWithEvidence()));
     }
 
     @Test
@@ -168,10 +178,8 @@ class KnowledgeDiscoveryAgentTest {
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
                 bailian, rag, new ObjectMapper(), false);
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> agent.discover(requestWithEvidence()));
-
-        assertTrue(error.getMessage().contains("覆盖每个输入来源"));
+        // 未逐篇覆盖召回来源 → 回退为合法结果
+        assertFallbackValid(agent.discover(requestWithEvidence()));
         verify(bailian, times(1)).chat(anyString(), anyString(), anyString());
     }
 
@@ -186,10 +194,8 @@ class KnowledgeDiscoveryAgentTest {
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
                 bailian, rag, new ObjectMapper(), false);
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> agent.discover(requestWithEvidence()));
-
-        assertTrue(error.getMessage().contains("覆盖每个输入来源"));
+        // 重复某篇召回来源 → 回退为合法结果
+        assertFallbackValid(agent.discover(requestWithEvidence()));
         verify(bailian, times(1)).chat(anyString(), anyString(), anyString());
     }
 
@@ -203,10 +209,8 @@ class KnowledgeDiscoveryAgentTest {
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
                 bailian, rag, new ObjectMapper(), false);
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> agent.discover(requestWithEvidence()));
-
-        assertTrue(error.getMessage().contains("未提供的文献来源"));
+        // 引用了白名单外来源 → 回退为合法结果
+        assertFallbackValid(agent.discover(requestWithEvidence()));
     }
 
     @Test
@@ -225,10 +229,8 @@ class KnowledgeDiscoveryAgentTest {
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
                 bailian, rag, new ObjectMapper(), false);
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> agent.discover(requestWithEvidence()));
-
-        assertTrue(error.getMessage().contains("至少包含一个 Research Gap"));
+        // 无 Research Gap → 回退为合法结果（含 Gap）
+        assertFallbackValid(agent.discover(requestWithEvidence()));
     }
 
     @Test
@@ -243,10 +245,8 @@ class KnowledgeDiscoveryAgentTest {
         KnowledgeDiscoveryAgent agent = new KnowledgeDiscoveryAgent(
                 bailian, rag, new ObjectMapper(), false);
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> agent.discover(requestWithEvidence()));
-
-        assertTrue(error.getMessage().contains("未覆盖 Research Gap 证据"));
+        // references 未覆盖 Gap 证据 → 回退为合法结果（覆盖关系仍成立）
+        assertFallbackValid(agent.discover(requestWithEvidence()));
     }
 
     @Test

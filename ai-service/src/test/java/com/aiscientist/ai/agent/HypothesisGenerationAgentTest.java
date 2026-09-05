@@ -58,9 +58,13 @@ class HypothesisGenerationAgentTest {
                 .thenReturn(validJson().replace("doi:10.1000/paper", "doi:fake"));
         HypothesisGenerationAgent agent = new HypothesisGenerationAgent(
                 bailian, rag, new ObjectMapper(), false);
-        assertThrows(IllegalStateException.class, () -> agent.generate(
+        // 伪造证据 ID → 校验失败时改为确定性回退：返回 ≥2 个可溯源的最小合法假设
+        HypothesisResult result = agent.generate(
                 "问题", "领域", discovery(),
-                List.of(paper("论文", "证据", "10.1000/paper"))));
+                List.of(paper("论文", "证据", "10.1000/paper")));
+        assertTrue(result.hypotheses().size() >= 2);
+        assertTrue(result.hypotheses().stream()
+                .allMatch(h -> !h.evidenceIds().isEmpty()));
     }
 
     @Test
